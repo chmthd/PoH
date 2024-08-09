@@ -30,4 +30,7 @@ fn main() {
 
     // distribute across shards
     distribute_transactions(&mut shards, transactions);
+    // run gossip protocol
+    let mut gossip_protocol = GossipProtocol::new();
+    gossip_protocol.gossip(&mut shards);
 }
