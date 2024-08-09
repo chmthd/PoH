@@ -1,2 +1,2 @@
-pub mod poh_entry;
-pub mod poh_generator;
+pub mod entry;
+pub mod generator;
