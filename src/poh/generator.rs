@@ -1,5 +1,6 @@
 use crate::poh::entry::PohEntry;
 
+#[derive(Debug)]
 pub struct PohGenerator {
     pub previous_hash: String,
     pub batch_size: usize,
