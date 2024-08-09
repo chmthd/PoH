@@ -4,16 +4,18 @@ use std::fmt::Write;
 
 #[derive(Debug)]
 pub struct PohEntry {
-    pub data: String,
+    pub transactions: Vec<String>,
     pub timestamp: i64,
     pub hash: String,
 }
 
 impl PohEntry {
-    pub fn new(data: &str, prev_hash: &str) -> Self {
+    pub fn new(transactions: Vec<String>, prev_hash: &str) -> Self {
         let timestamp = Utc::now().timestamp();
         let mut hasher = Sha256::new();
-        hasher.update(data);
+        for tx in &transactions {
+            hasher.update(tx);
+        }
         hasher.update(prev_hash);
         hasher.update(timestamp.to_string());
         let result = hasher.finalize();
@@ -23,9 +25,17 @@ impl PohEntry {
         }
         
         PohEntry {
-            data: data.to_string(),
+            transactions,
             timestamp,
             hash: hash_str,
         }
+    }
+
+    pub fn validate_transaction(tx: &str) -> Result<(), &'static str> {
+        if tx.is_empty() {
+            return Err("Transaction is empty");
+        }
+        //more validation rules for later
+        Ok(())
     }
 }
