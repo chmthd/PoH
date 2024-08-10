@@ -1,17 +1,22 @@
 use sha2::{Sha256, Digest};
-use chrono::Utc;
+use chrono::{Utc, NaiveDateTime};
 use std::fmt::Write;
 
 #[derive(Debug)]
 pub struct PohEntry {
     pub transactions: Vec<String>,
-    pub timestamp: i64,
+    pub timestamp: i64,           
+    pub readable_timestamp: String,
     pub hash: String,
 }
 
 impl PohEntry {
     pub fn new(transactions: Vec<String>, prev_hash: &str) -> Self {
         let timestamp = Utc::now().timestamp();
+        let readable_timestamp = NaiveDateTime::from_timestamp(timestamp, 0)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+
         let mut hasher = Sha256::new();
         for tx in &transactions {
             hasher.update(tx);
@@ -23,10 +28,11 @@ impl PohEntry {
         for byte in result {
             write!(&mut hash_str, "{:02x}", byte).expect("Unable to write");
         }
-        
+
         PohEntry {
             transactions,
             timestamp,
+            readable_timestamp,
             hash: hash_str,
         }
     }
