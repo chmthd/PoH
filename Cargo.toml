@@ -1,5 +1,5 @@
 [package]
-name = "pohs"
+name = "pohts"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,3 +8,6 @@ sha2 = "0.9"
 chrono = "0.4"
 rand = "0.8"
 
+[[bin]]
+name = "poh"
+path = "main.rs"
