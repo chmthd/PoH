@@ -1,4 +1,5 @@
 use crate::poh::generator::PohGenerator;
+use crate::block::block::Block;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -16,6 +17,7 @@ pub struct Shard {
     transaction_count: usize,
     transactions: Vec<Transaction>, // processed transactions
     ledger: HashMap<String, u64>,
+    pub blocks: Vec<Block>,
 }
 
 impl Shard {
@@ -27,6 +29,7 @@ impl Shard {
             transaction_count: 0,
             transactions: Vec::new(),
             ledger: HashMap::new(),
+            blocks: Vec::new(),
         }
     }
 
@@ -46,9 +49,16 @@ impl Shard {
         let tx_strings: Vec<String> = transactions.iter().map(|tx| tx.id.clone()).collect();
         match self.generator.generate_entries(tx_strings) {
             Ok(entries) => {
-                for entry in entries {
-                    println!("Shard {}: Processed PoH Entry: {:?}", self.id, entry);
-                }
+                let block_number = self.blocks.len() as u64 + 1;
+                let previous_hash = if let Some(last_block) = self.blocks.last() {
+                    &last_block.block_hash
+                } else {
+                    "0"
+                };
+                let block = Block::new(block_number, entries, previous_hash);
+                self.blocks.push(block);
+
+                println!("Shard {}: Processed Block {:?}", self.id, self.blocks.last().unwrap());
             }
             Err(e) => {
                 println!("Shard {}: Error processing transactions: {}", self.id, e);
@@ -63,13 +73,13 @@ impl Shard {
         }
     }
 
-    // incorporate gossiped transaction data
-    pub fn update_state_from_gossip_data(&mut self, transactions: Vec<Transaction>) {
-        println!("Shard {} is incorporating gossiped transactions.", self.id);
-        for tx in transactions {
-            if !self.transactions.iter().any(|t| t.id == tx.id) {
-                self.transactions.push(tx.clone());
-                *self.ledger.entry(tx.id.clone()).or_insert(0) += tx.amount;
+    // incorporate gossiped block data
+    pub fn update_state_from_gossip_data(&mut self, blocks: Vec<Block>) {
+        println!("Shard {} is incorporating gossiped blocks.", self.id);
+        for block in blocks {
+            if !self.blocks.iter().any(|b| b.block_hash == block.block_hash) {
+                self.blocks.push(block);
+                println!("Shard {}: Added gossiped block to state.", self.id);
             }
         }
     }

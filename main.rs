@@ -1,4 +1,5 @@
 mod poh;
+mod block;
 mod shard;
 mod network;
 

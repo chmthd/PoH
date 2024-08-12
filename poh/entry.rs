@@ -1,8 +1,8 @@
 use sha2::{Sha256, Digest};
-use chrono::{Utc, NaiveDateTime};
+use chrono::{Utc, DateTime, NaiveDateTime};
 use std::fmt::Write;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PohEntry {
     pub transactions: Vec<String>,
     pub timestamp: i64,           
@@ -13,7 +13,7 @@ pub struct PohEntry {
 impl PohEntry {
     pub fn new(transactions: Vec<String>, prev_hash: &str) -> Self {
         let timestamp = Utc::now().timestamp();
-        let readable_timestamp = NaiveDateTime::from_timestamp(timestamp, 0)
+        let readable_timestamp = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(timestamp, 0), Utc)
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();
 
@@ -41,7 +41,7 @@ impl PohEntry {
         if tx.is_empty() {
             return Err("Transaction is empty");
         }
-        //more validation rules for later
+        // more validation rules for later
         Ok(())
     }
 }
