@@ -18,10 +18,11 @@ pub struct Shard {
     transactions: Vec<Transaction>, // processed transactions
     ledger: HashMap<String, u64>,
     pub blocks: Vec<Block>,
+    max_transactions_per_block: usize,
 }
 
 impl Shard {
-    pub fn new(id: usize, batch_size: usize) -> Self {
+    pub fn new(id: usize, batch_size: usize, max_transactions_per_block: usize) -> Self {
         Shard {
             id,
             generator: PohGenerator::new(batch_size),
@@ -30,6 +31,7 @@ impl Shard {
             transactions: Vec::new(),
             ledger: HashMap::new(),
             blocks: Vec::new(),
+            max_transactions_per_block,
         }
     }
 
@@ -66,7 +68,7 @@ impl Shard {
         }
 
         // dynamic epoch management based on the number of transactions
-        if self.transaction_count >= 10 {
+        if self.transaction_count >= self.max_transactions_per_block {
             self.epoch += 1;
             self.transaction_count = 0;
             println!("Shard {}: Moving to next epoch: {}", self.id, self.epoch);

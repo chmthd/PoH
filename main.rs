@@ -9,6 +9,8 @@ use std::thread;
 use std::time::Duration;
 use rand::Rng;
 
+const MAX_TRANSACTIONS_PER_BLOCK: usize = 50;
+
 fn send_random_transactions(shards: &mut Vec<Shard>, gossip_protocol: &mut GossipProtocol) {
     let mut rng = rand::thread_rng();
     let mut tx_count = 1;
@@ -37,8 +39,8 @@ fn send_random_transactions(shards: &mut Vec<Shard>, gossip_protocol: &mut Gossi
 fn main() {
     // change this to dynamic later/////////////////////////////////////////////////
     let mut shards = vec![
-        Shard::new(1, 3), // id 1, batch size 3
-        Shard::new(2, 2), // 
+        Shard::new(1, 3, MAX_TRANSACTIONS_PER_BLOCK),
+        Shard::new(2, 2, MAX_TRANSACTIONS_PER_BLOCK), 
     ];
 
     // run gossip protocol
