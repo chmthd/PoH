@@ -1,6 +1,7 @@
 use crate::poh::generator::PohGenerator;
 use crate::block::block::Block;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct Transaction {
@@ -15,10 +16,12 @@ pub struct Shard {
     generator: PohGenerator,
     epoch: usize,
     transaction_count: usize,
-    transactions: Vec<Transaction>, // processed transactions
+    transaction_pool: Vec<Transaction>, // tx pool vector
     ledger: HashMap<String, u64>,
     pub blocks: Vec<Block>,
     max_transactions_per_block: usize,
+    last_block_time: Instant,           
+    block_time_threshold: Duration,    
 }
 
 impl Shard {
@@ -28,27 +31,38 @@ impl Shard {
             generator: PohGenerator::new(batch_size),
             epoch: 0,
             transaction_count: 0,
-            transactions: Vec::new(),
+            transaction_pool: Vec::new(),
             ledger: HashMap::new(),
             blocks: Vec::new(),
             max_transactions_per_block,
+            last_block_time: Instant::now(),
+            block_time_threshold: Duration::from_secs(10), // force block creation every 10 seconds for now
         }
     }
 
     pub fn get_transactions(&self) -> Vec<Transaction> {
-        self.transactions.clone()
+        self.transaction_pool.clone()
     }
 
     pub fn process_transactions(&mut self, transactions: Vec<Transaction>) {
-        self.transaction_count += transactions.len();
+        self.transaction_pool.extend(transactions);  // add incoming txs to pool
+        let time_since_last_block = self.last_block_time.elapsed();
 
-        // add txs to the shard's tx list
-        for tx in &transactions {
-            self.transactions.push(tx.clone());
-            *self.ledger.entry(tx.id.clone()).or_insert(0) += tx.amount;
+        // create a block if the tx pool exceeds the limit or the time threshold is reached
+        if self.transaction_pool.len() >= self.max_transactions_per_block || time_since_last_block >= self.block_time_threshold {
+            self.create_block();
+            self.last_block_time = Instant::now();
         }
+    }
 
-        let tx_strings: Vec<String> = transactions.iter().map(|tx| tx.id.clone()).collect();
+    fn create_block(&mut self) {
+        //determine the number of txs to include in the block
+        let transactions_to_include = self.transaction_pool
+            .drain(..std::cmp::min(self.max_transactions_per_block, self.transaction_pool.len()))
+            .collect::<Vec<_>>();
+        
+        let tx_strings: Vec<String> = transactions_to_include.iter().map(|tx| tx.id.clone()).collect();
+
         match self.generator.generate_entries(tx_strings) {
             Ok(entries) => {
                 let block_number = self.blocks.len() as u64 + 1;

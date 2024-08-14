@@ -25,7 +25,9 @@ fn send_random_transactions(shards: &mut Vec<Shard>, gossip_protocol: &mut Gossi
 
     loop {
         let amount = rng.gen_range(1..1000);
-        let shard_index = rng.gen_range(0..shards.len());
+
+        // send txs to the first shard for now
+        let shard_index = 0;
 
         let transaction = Transaction {
             id: format!("tx{}", tx_count),
