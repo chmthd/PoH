@@ -13,7 +13,7 @@ use std::io::Write;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 
-const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
+const MAX_TRANSACTIONS_PER_BLOCK: usize = 100;
 
 fn hash_to_shard(target: &str, shard_count: usize) -> usize {
     let mut hasher = DefaultHasher::new();
@@ -69,6 +69,7 @@ fn send_random_transactions(shards: &mut Vec<Shard>, gossip_protocol: &mut Gossi
 
         gossip_protocol.gossip(shards);
 
+        // logging
         if shards[shard_index].blocks.len() > tx_count / MAX_TRANSACTIONS_PER_BLOCK {
             let block_gen_time = block_start_time.elapsed().as_secs_f64();
             let last_block = shards[shard_index].blocks.last().unwrap();
@@ -105,8 +106,8 @@ fn send_random_transactions(shards: &mut Vec<Shard>, gossip_protocol: &mut Gossi
 
 fn main() {
     let mut shards = vec![
-        Shard::new(1, 3, MAX_TRANSACTIONS_PER_BLOCK),
-        Shard::new(2, 3, MAX_TRANSACTIONS_PER_BLOCK),
+        Shard::new(1, 100, MAX_TRANSACTIONS_PER_BLOCK),
+        Shard::new(2, 100, MAX_TRANSACTIONS_PER_BLOCK),
     ];
 
     let mut gossip_protocol = GossipProtocol::new();
