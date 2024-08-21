@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <style>
+        .stat-card {
+            display: inline-block;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 8px;
+            width: 150px;
+            text-align: center;
+        }
+
+        h1 {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Blockchain Network Overview</h1>
+    <div class="stat-card" id="current-block">
+        <h2>Current Block</h2>
+        <p id="current-block-value">Loading...</p>
+    </div>
+    <div class="stat-card" id="transactions-processed">
+        <h2>Transactions Processed</h2>
+        <p id="transactions-processed-value">Loading...</p>
+    </div>
+    <div class="stat-card" id="shards">
+        <h2>Shards</h2>
+        <p id="shards-value">Loading...</p>
+    </div>
+    <div class="stat-card" id="tx-pool-size">
+        <h2>TX Pool Size</h2>
+        <p id="tx-pool-size-value">Loading...</p>
+    </div>
+    <div class="stat-card" id="block-size">
+        <h2>Block Size</h2>
+        <p id="block-size-value">Loading...</p>
+    </div>
+
+    <script>
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+
+                document.getElementById('current-block-value').innerText = data.total_blocks;
+                document.getElementById('transactions-processed-value').innerText = data.total_transactions;
+                document.getElementById('shards-value').innerText = data.num_shards;
+                document.getElementById('tx-pool-size-value').innerText = data.transaction_pool_size;
+                document.getElementById('block-size-value').innerText = `${data.avg_block_size} bytes`;
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+            }
+        }
+
+        setInterval(fetchStats, 5000);
+        fetchStats();
+    </script>
+</body>
+</html>
