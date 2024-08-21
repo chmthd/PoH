@@ -1,8 +1,10 @@
+// main.rs
+
 mod poh;
 mod block;
 mod shard;
 mod network;
-mod validator; 
+mod validator;
 
 use actix_files::NamedFile;
 use actix_web::{get, web, App, HttpServer, Responder, HttpResponse};
@@ -241,7 +243,7 @@ async fn main() -> std::io::Result<()> {
     for i in 1..=4 {
         let mut validators = Vec::new();
         for j in 1..=NUM_VALIDATORS {
-            validators.push(Validator::new(j)); 
+            validators.push(Validator::new(j, i)); // create validators with shard_id
         }
         shards.push(Shard::new(i, 100, MAX_TRANSACTIONS_PER_BLOCK, validators));
     }
