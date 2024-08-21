@@ -2,12 +2,14 @@ mod poh;
 mod block;
 mod shard;
 mod network;
+mod validator; 
 
 use actix_files::NamedFile;
 use actix_web::{get, web, App, HttpServer, Responder, HttpResponse};
 use serde::Serialize;
 use shard::shard::{Shard, Transaction, TransactionStatus};
 use network::gossip_protocol::GossipProtocol;
+use crate::validator::validator::Validator;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -19,6 +21,7 @@ use std::hash::{Hash, Hasher};
 use std::collections::HashMap;
 
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 100;
+const NUM_VALIDATORS: usize = 3; 
 
 #[derive(Serialize)]
 struct TransactionDetail {
@@ -52,7 +55,6 @@ struct AppState {
     transaction_start_times: Arc<Mutex<HashMap<String, Instant>>>, 
 }
 
-// api endpoint for stats
 #[get("/api/stats")]
 async fn get_stats(data: web::Data<AppState>) -> impl Responder {
     let shards = data.shards.lock().unwrap();
@@ -234,12 +236,17 @@ fn hash_to_shard(target: &str, shard_count: usize) -> usize {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let shards = Arc::new(Mutex::new(vec![
-        Shard::new(1, 100, MAX_TRANSACTIONS_PER_BLOCK),
-        Shard::new(2, 100, MAX_TRANSACTIONS_PER_BLOCK),
-        Shard::new(3, 100, MAX_TRANSACTIONS_PER_BLOCK),
-        Shard::new(4, 100, MAX_TRANSACTIONS_PER_BLOCK)
-    ]));
+    let mut shards = Vec::new();
+
+    for i in 1..=4 {
+        let mut validators = Vec::new();
+        for j in 1..=NUM_VALIDATORS {
+            validators.push(Validator::new(j)); 
+        }
+        shards.push(Shard::new(i, 100, MAX_TRANSACTIONS_PER_BLOCK, validators));
+    }
+
+    let shards = Arc::new(Mutex::new(shards));
 
     let gossip_protocol = Arc::new(Mutex::new(GossipProtocol::new()));
     let transaction_start_times = Arc::new(Mutex::new(HashMap::new()));
