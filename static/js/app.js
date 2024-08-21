@@ -5,9 +5,19 @@ async function fetchStats() {
 
         document.getElementById('current-block-value').innerText = data.total_blocks;
         document.getElementById('transactions-processed-value').innerText = data.total_transactions;
-        document.getElementById('shards-value').innerText = data.num_shards;
-        document.getElementById('tx-pool-size-value').innerText = data.transaction_pool_size;
         document.getElementById('block-size-value').innerText = `${data.avg_block_size} bytes`;
+        document.getElementById('avg-tx-size-value').innerText = `${data.avg_tx_size} bytes`;
+
+        const transactionsList = document.getElementById('transactions-list');
+        transactionsList.innerHTML = '';
+
+        data.shard_stats.forEach(shard => {
+            shard.transactions.forEach(tx => {
+                const row = document.createElement('tr');
+                row.innerHTML = `<td>${tx.id}</td><td>${tx.status}</td>`;
+                transactionsList.appendChild(row);
+            });
+        });
     } catch (error) {
         console.error('Error fetching stats:', error);
     }

@@ -58,13 +58,12 @@ impl Shard {
         }
     }
 
-    // public getter methods for accessing private fields
-    pub fn get_transaction_pool_len(&self) -> usize {
-        self.transaction_pool.len()
+    pub fn get_transaction_pool(&self) -> &Vec<Transaction> {
+        &self.transaction_pool
     }
 
-    pub fn get_processed_transactions_len(&self) -> usize {
-        self.processed_transactions.len()
+    pub fn get_processed_transactions(&self) -> &HashSet<String> {
+        &self.processed_transactions
     }
 
     pub fn get_pending_cross_shard_txs_len(&self) -> usize {
@@ -87,14 +86,14 @@ impl Shard {
                 self.processed_transactions.insert(tx.id.clone());
             }
         }
-    
+
         println!(
             "Shard {}: Transaction pool size after processing: {}",
             self.id,
             self.transaction_pool.len()
         );
-    
-        if self.transaction_pool.len() >= 10 {
+
+        if self.transaction_pool.len() >= self.min_transactions_per_block {
             self.check_and_create_block();
         } else {
             println!(
@@ -112,24 +111,24 @@ impl Shard {
             );
             return;
         }
-    
+
         println!(
             "Shard {}: Processing cross-shard transaction {} from Shard {}",
             self.id, transaction.id, transaction.from_shard
         );
-    
+
         transaction.status = TransactionStatus::Processing;
         self.transaction_pool.push(transaction.clone());
         self.transaction_count += 1;
         self.processed_transactions.insert(transaction.id.clone());
-    
+
         println!(
             "Shard {}: Transaction pool size after processing cross-shard transaction: {}",
             self.id,
             self.transaction_pool.len()
         );
-    
-        if self.transaction_pool.len() >= 10 {
+
+        if self.transaction_pool.len() >= self.min_transactions_per_block {
             self.check_and_create_block();
         } else {
             println!(
@@ -137,7 +136,7 @@ impl Shard {
                 self.id
             );
         }
-    
+
         println!(
             "Shard {}: Completed processing cross-shard transaction {}. New status: {:?}",
             self.id, transaction.id, transaction.status
@@ -150,7 +149,7 @@ impl Shard {
 
         if total_transactions >= self.min_transactions_per_block && time_since_last_block >= self.block_time_threshold {
             self.create_block();
-            self.last_block_time = Instant::now(); 
+            self.last_block_time = Instant::now();
         } else {
             println!(
                 "Shard {}: Not enough transactions or time not yet reached. Current pool size: {}, Time since last block: {:?}",
@@ -168,17 +167,21 @@ impl Shard {
             );
             return;
         }
-    
+
         let mut transactions_to_include = Vec::new();
-    
+
         transactions_to_include.extend(self.pending_cross_shard_txs.drain(..));
-    
+
         transactions_to_include.extend(self.transaction_pool.drain(..));
 
         transactions_to_include.truncate(self.max_transactions_per_block);
-    
+
+        for tx in transactions_to_include.iter_mut() {
+            tx.status = TransactionStatus::Completed;
+        }
+
         let tx_strings: Vec<String> = transactions_to_include.iter().map(|tx| tx.id.clone()).collect();
-    
+
         match self.generator.generate_entries(tx_strings) {
             Ok(entries) => {
                 let block_number = self.blocks.len() as u64 + 1;
@@ -189,7 +192,7 @@ impl Shard {
                 };
                 let block = Block::new(block_number, entries, previous_hash);
                 self.blocks.push(block);
-    
+
                 println!(
                     "Shard {}: Processed Block {:?} with {} transactions",
                     self.id,
@@ -212,13 +215,13 @@ impl Shard {
             );
             return;
         }
-    
+
         println!(
             "Shard {}: Adding pending cross-shard transaction {}",
             self.id, transaction.id
         );
         self.pending_cross_shard_txs.push(transaction);
-    
+
         println!(
             "Shard {}: Pending cross-shard transactions count: {}",
             self.id,

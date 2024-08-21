@@ -3,44 +3,119 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard</title>
+    <title>Blockchain Network Dashboard</title>
     <style>
-        .stat-card {
-            display: inline-block;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            padding: 16px;
-            margin: 8px;
-            width: 150px;
-            text-align: center;
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1d1d1d;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
         }
 
         h1 {
             text-align: center;
+            margin-bottom: 20px;
+            color: #ffffff;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            max-width: 800px;
+            margin-right: 40px;
+        }
+
+        .stat-card {
+            border: 1px solid #666;
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+            background-color: #2c2c2c;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .transactions-container {
+            border: 1px solid #666;
+            border-radius: 12px;
+            padding: 16px;
+            background-color: #2c2c2c;
+            width: 250px;
+            height: 400px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            overflow-y: auto;
+        }
+
+        .transactions-container h2 {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .transactions-container table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .transactions-container th, .transactions-container td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #444;
+        }
+
+        .transactions-container th {
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
-    <h1>Blockchain Network Overview</h1>
-    <div class="stat-card" id="current-block">
-        <h2>Current Block</h2>
-        <p id="current-block-value">Loading...</p>
+    <div class="dashboard">
+        <div class="stat-card">
+            <h2>Current Block</h2>
+            <p id="current-block-value">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>Average Block Size</h2>
+            <p id="block-size-value">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>Processed Transactions</h2>
+            <p id="transactions-processed-value">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>Average Transaction Size</h2>
+            <p id="avg-tx-size-value">Loading...</p>
+        </div>        
+        <div class="stat-card">
+            <h2>Current Block</h2>
+            <p>Placeholder</p>
+        </div>
+        <div class="stat-card">
+            <h2>Current Block</h2>
+            <p>Placeholder</p>
+        </div>
     </div>
-    <div class="stat-card" id="transactions-processed">
-        <h2>Transactions Processed</h2>
-        <p id="transactions-processed-value">Loading...</p>
-    </div>
-    <div class="stat-card" id="shards">
-        <h2>Shards</h2>
-        <p id="shards-value">Loading...</p>
-    </div>
-    <div class="stat-card" id="tx-pool-size">
-        <h2>TX Pool Size</h2>
-        <p id="tx-pool-size-value">Loading...</p>
-    </div>
-    <div class="stat-card" id="block-size">
-        <h2>Block Size</h2>
-        <p id="block-size-value">Loading...</p>
+
+    <div class="transactions-container">
+        <h2>Transactions</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Tx Number</th>
+                    <th>State</th>
+                </tr>
+            </thead>
+            <tbody id="transactions-list">
+                <tr>
+                    <td>Loading...</td>
+                    <td>Loading...</td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 
     <script>
@@ -50,10 +125,20 @@
                 const data = await response.json();
 
                 document.getElementById('current-block-value').innerText = data.total_blocks;
-                document.getElementById('transactions-processed-value').innerText = data.total_transactions;
-                document.getElementById('shards-value').innerText = data.num_shards;
-                document.getElementById('tx-pool-size-value').innerText = data.transaction_pool_size;
                 document.getElementById('block-size-value').innerText = `${data.avg_block_size} bytes`;
+                document.getElementById('transactions-processed-value').innerText = data.total_transactions;
+                document.getElementById('avg-tx-size-value').innerText = `${data.avg_tx_size} bytes`;
+
+                const transactionsList = document.getElementById('transactions-list');
+                transactionsList.innerHTML = '';
+
+                data.shard_stats.forEach(shard => {
+                    shard.transactions.forEach(tx => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `<td>${tx.id}</td><td>${tx.status}</td>`;
+                        transactionsList.appendChild(row);
+                    });
+                });
             } catch (error) {
                 console.error('Error fetching stats:', error);
             }

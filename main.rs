@@ -16,8 +16,23 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 100;
+
+#[derive(Serialize)]
+struct TransactionDetail {
+    id: String,
+    status: String,
+    processing_time_ms: Option<u128>, 
+}
+
+#[derive(Serialize)]
+struct ShardStats {
+    id: usize,
+    transaction_pool_size: usize,
+    transactions: Vec<TransactionDetail>,
+}
 
 #[derive(Serialize)]
 struct NetworkStats {
@@ -27,26 +42,91 @@ struct NetworkStats {
     avg_block_size: usize,
     transaction_pool_size: usize,
     total_cross_shard_transactions: usize,
+    shard_stats: Vec<ShardStats>, 
+    avg_tx_confirmation_time_ms: Option<u128>, 
+    avg_tx_size: usize,
 }
 
 struct AppState {
     shards: Arc<Mutex<Vec<Shard>>>,
+    transaction_start_times: Arc<Mutex<HashMap<String, Instant>>>, 
 }
 
 // api endpoint for stats
 #[get("/api/stats")]
 async fn get_stats(data: web::Data<AppState>) -> impl Responder {
     let shards = data.shards.lock().unwrap();
+    let tx_start_times = data.transaction_start_times.lock().unwrap();
     
     let total_blocks: usize = shards.iter().map(|shard| shard.blocks.len()).sum();
-    let total_transactions: usize = shards.iter().map(|shard| shard.get_processed_transactions_len()).sum();
+    let total_transactions: usize = shards.iter().map(|shard| shard.get_processed_transactions().len()).sum();
+    
+    let total_block_size: usize = shards.iter()
+        .flat_map(|shard| shard.blocks.iter())
+        .map(|block| std::mem::size_of_val(block))
+        .sum();
+    
     let avg_block_size = if total_blocks > 0 {
-        total_transactions / total_blocks
+        total_block_size / total_blocks
     } else {
         0
     };
-    let transaction_pool_size: usize = shards.iter().map(|shard| shard.get_transaction_pool_len()).sum();
+
+    let total_tx_size: usize = shards.iter()
+        .flat_map(|shard| shard.get_processed_transactions())
+        .map(|tx| std::mem::size_of_val(tx))
+        .sum();
+    
+    let avg_tx_size = if total_transactions > 0 {
+        total_tx_size / total_transactions
+    } else {
+        0
+    };
+
+    let transaction_pool_size: usize = shards.iter().map(|shard| shard.get_transaction_pool().len()).sum();
     let total_cross_shard_transactions: usize = shards.iter().map(|shard| shard.get_pending_cross_shard_txs_len()).sum();
+
+    let mut shard_stats = Vec::new();
+    let mut total_confirmation_time: u128 = 0;
+    let mut confirmed_tx_count: usize = 0;
+
+    for shard in shards.iter() {
+        let mut transactions = Vec::new();
+        for tx in shard.get_transaction_pool() {
+            let tx_id = &tx.id;
+            let status = format!("{:?}", tx.status);
+            let processing_time_ms = match tx.status {
+                TransactionStatus::Completed => {
+                    if let Some(start_time) = tx_start_times.get(tx_id) {
+                        let duration = start_time.elapsed().as_millis();
+                        total_confirmation_time += duration;
+                        confirmed_tx_count += 1;
+                        Some(duration)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            transactions.push(TransactionDetail {
+                id: tx_id.clone(),
+                status,
+                processing_time_ms,
+            });
+        }
+
+        shard_stats.push(ShardStats {
+            id: shard.id,
+            transaction_pool_size: shard.get_transaction_pool().len(),
+            transactions,
+        });
+    }
+
+    let avg_tx_confirmation_time_ms = if confirmed_tx_count > 0 {
+        Some(total_confirmation_time / confirmed_tx_count as u128)
+    } else {
+        None
+    };
 
     let stats = NetworkStats {
         num_shards: shards.len(),
@@ -55,6 +135,9 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         avg_block_size,
         transaction_pool_size,
         total_cross_shard_transactions,
+        shard_stats,
+        avg_tx_confirmation_time_ms,
+        avg_tx_size, 
     };
 
     HttpResponse::Ok().json(stats)
@@ -64,7 +147,7 @@ async fn index() -> impl Responder {
     NamedFile::open("./static/index.html").unwrap()
 }
 
-fn send_random_transactions(shards: Arc<Mutex<Vec<Shard>>>, gossip_protocol: Arc<Mutex<GossipProtocol>>) {
+fn send_random_transactions(shards: Arc<Mutex<Vec<Shard>>>, gossip_protocol: Arc<Mutex<GossipProtocol>>, tx_start_times: Arc<Mutex<HashMap<String, Instant>>>) {
     thread::spawn(move || {
         let mut rng = rand::thread_rng();
         let mut tx_count = 1;
@@ -89,6 +172,8 @@ fn send_random_transactions(shards: Arc<Mutex<Vec<Shard>>>, gossip_protocol: Arc
                 to_shard,
                 status: TransactionStatus::Pending,
             };
+
+            tx_start_times.lock().unwrap().insert(transaction_id.clone(), Instant::now());
 
             println!(
                 "Sending Transaction {} from Shard {} to Shard {} (Status: {:?})",
@@ -157,10 +242,18 @@ async fn main() -> std::io::Result<()> {
     ]));
 
     let gossip_protocol = Arc::new(Mutex::new(GossipProtocol::new()));
+    let transaction_start_times = Arc::new(Mutex::new(HashMap::new()));
 
-    let app_state = web::Data::new(AppState { shards: Arc::clone(&shards) });
+    let app_state = web::Data::new(AppState { 
+        shards: Arc::clone(&shards),
+        transaction_start_times: Arc::clone(&transaction_start_times),
+    });
 
-    send_random_transactions(Arc::clone(&shards), Arc::clone(&gossip_protocol));
+    send_random_transactions(
+        Arc::clone(&shards),
+        Arc::clone(&gossip_protocol),
+        Arc::clone(&transaction_start_times),
+    );
 
     HttpServer::new(move || {
         App::new()
