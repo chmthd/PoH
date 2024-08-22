@@ -14,7 +14,11 @@ async function fetchStats() {
         data.shard_stats.forEach(shard => {
             shard.transactions.forEach(tx => {
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${tx.id}</td><td>${tx.status}</td>`;
+                row.innerHTML = `
+                    <td>${tx.id}</td>
+                    <td>${tx.status}</td>
+                    <td>${tx.block_number}</td> <!-- New block number column -->
+                `;
                 transactionsList.appendChild(row);
             });
         });

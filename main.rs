@@ -1,5 +1,3 @@
-// main.rs
-
 mod poh;
 mod block;
 mod shard;
@@ -29,7 +27,9 @@ const NUM_VALIDATORS: usize = 3;
 struct TransactionDetail {
     id: String,
     status: String,
-    processing_time_ms: Option<u128>, 
+    processing_time_ms: Option<u128>,
+    block_number: String,
+    shard_number: usize,
 }
 
 #[derive(Serialize)]
@@ -47,29 +47,29 @@ struct NetworkStats {
     avg_block_size: usize,
     transaction_pool_size: usize,
     total_cross_shard_transactions: usize,
-    shard_stats: Vec<ShardStats>, 
-    avg_tx_confirmation_time_ms: Option<u128>, 
+    shard_stats: Vec<ShardStats>,
+    avg_tx_confirmation_time_ms: Option<u128>,
     avg_tx_size: usize,
 }
 
 struct AppState {
     shards: Arc<Mutex<Vec<Shard>>>,
-    transaction_start_times: Arc<Mutex<HashMap<String, Instant>>>, 
+    transaction_start_times: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 #[get("/api/stats")]
 async fn get_stats(data: web::Data<AppState>) -> impl Responder {
     let shards = data.shards.lock().unwrap();
     let tx_start_times = data.transaction_start_times.lock().unwrap();
-    
+
     let total_blocks: usize = shards.iter().map(|shard| shard.blocks.len()).sum();
     let total_transactions: usize = shards.iter().map(|shard| shard.get_processed_transactions().len()).sum();
-    
+
     let total_block_size: usize = shards.iter()
         .flat_map(|shard| shard.blocks.iter())
         .map(|block| std::mem::size_of_val(block))
         .sum();
-    
+
     let avg_block_size = if total_blocks > 0 {
         total_block_size / total_blocks
     } else {
@@ -80,7 +80,7 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         .flat_map(|shard| shard.get_processed_transactions())
         .map(|tx| std::mem::size_of_val(tx))
         .sum();
-    
+
     let avg_tx_size = if total_transactions > 0 {
         total_tx_size / total_transactions
     } else {
@@ -96,9 +96,33 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
 
     for shard in shards.iter() {
         let mut transactions = Vec::new();
+
+        for block in &shard.blocks {
+            for tx in &block.poh_entries[0].transactions {
+                let status = String::from("Completed");
+                let block_number = block.block_number.to_string();
+                let shard_number = shard.id;
+                let processing_time_ms = tx_start_times.get(tx).map(|start_time| start_time.elapsed().as_millis());
+
+                transactions.push(TransactionDetail {
+                    id: tx.clone(),
+                    status,
+                    processing_time_ms,
+                    block_number,
+                    shard_number,
+                });
+
+                if let Some(duration) = processing_time_ms {
+                    total_confirmation_time += duration;
+                    confirmed_tx_count += 1;
+                }
+            }
+        }
+
         for tx in shard.get_transaction_pool() {
             let tx_id = &tx.id;
             let status = format!("{:?}", tx.status);
+            let shard_number = shard.id;
             let processing_time_ms = match tx.status {
                 TransactionStatus::Completed => {
                     if let Some(start_time) = tx_start_times.get(tx_id) {
@@ -112,10 +136,18 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
                 }
                 _ => None,
             };
+            let block_number = if tx.status == TransactionStatus::Processing {
+                "Processing".to_string()
+            } else {
+                "Unassigned".to_string()
+            };
+
             transactions.push(TransactionDetail {
                 id: tx_id.clone(),
                 status,
                 processing_time_ms,
+                block_number,
+                shard_number,
             });
         }
 
@@ -141,7 +173,7 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         total_cross_shard_transactions,
         shard_stats,
         avg_tx_confirmation_time_ms,
-        avg_tx_size, 
+        avg_tx_size,
     };
 
     HttpResponse::Ok().json(stats)
@@ -243,7 +275,7 @@ async fn main() -> std::io::Result<()> {
     for i in 1..=4 {
         let mut validators = Vec::new();
         for j in 1..=NUM_VALIDATORS {
-            validators.push(Validator::new(j, i)); // create validators with shard_id
+            validators.push(Validator::new(j, i));
         }
         shards.push(Shard::new(i, 100, MAX_TRANSACTIONS_PER_BLOCK, validators));
     }
