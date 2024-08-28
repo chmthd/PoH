@@ -9,6 +9,7 @@ use actix_web::{get, web, App, HttpServer, Responder, HttpResponse};
 use serde::Serialize;
 use shard::shard::{Shard, Transaction, TransactionStatus};
 use network::gossip_protocol::GossipProtocol;
+use network::bootstrap::bootstrap_node::BootstrapNode; 
 use crate::validator::validator::Validator;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -20,8 +21,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::collections::HashMap;
 
-const MAX_TRANSACTIONS_PER_BLOCK: usize = 100;
-const NUM_VALIDATORS: usize = 3; 
+const MAX_TRANSACTIONS_PER_BLOCK: usize = 1000;
+const NUM_VALIDATORS: usize = 10;
 
 #[derive(Serialize)]
 struct TransactionDetail {
@@ -186,7 +187,7 @@ async fn index() -> impl Responder {
 fn send_random_transactions(shards: Arc<Mutex<Vec<Shard>>>, gossip_protocol: Arc<Mutex<GossipProtocol>>, tx_start_times: Arc<Mutex<HashMap<String, Instant>>>) {
     thread::spawn(move || {
         let mut rng = rand::thread_rng();
-        let mut tx_count = 1;
+        let mut tx_count = 10;
         let mut block_start_time = Instant::now();
         let mut log_file = OpenOptions::new()
             .create(true)
@@ -270,6 +271,12 @@ fn hash_to_shard(target: &str, shard_count: usize) -> usize {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // start the bootstrap node server
+    let bootstrap_node = BootstrapNode::new();
+    thread::spawn(move || {
+        bootstrap_node.start(8080);  
+    });
+
     let mut shards = Vec::new();
 
     for i in 1..=4 {
