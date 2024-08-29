@@ -9,7 +9,7 @@ use actix_web::{get, web, App, HttpServer, Responder, HttpResponse};
 use serde::Serialize;
 use shard::shard::{Shard, Transaction, TransactionStatus};
 use network::gossip_protocol::GossipProtocol;
-use network::bootstrap::bootstrap_node::BootstrapNode; 
+use network::bootstrap::bootstrap_node::BootstrapNode;
 use crate::validator::validator::Validator;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -20,9 +20,19 @@ use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::collections::HashMap;
+use std::env;
+use std::net::{SocketAddr, TcpStream};
+use local_ip_address;
 
-const MAX_TRANSACTIONS_PER_BLOCK: usize = 1000;
-const NUM_VALIDATORS: usize = 10;
+const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
+const NUM_VALIDATORS: usize = 2;
+
+#[derive(Serialize, Clone)]
+struct ShardInfo {
+    id: usize,
+    ip: String,
+    port: u16,
+}
 
 #[derive(Serialize)]
 struct TransactionDetail {
@@ -51,11 +61,13 @@ struct NetworkStats {
     shard_stats: Vec<ShardStats>,
     avg_tx_confirmation_time_ms: Option<u128>,
     avg_tx_size: usize,
+    shard_info: Vec<ShardInfo>, 
 }
 
 struct AppState {
     shards: Arc<Mutex<Vec<Shard>>>,
     transaction_start_times: Arc<Mutex<HashMap<String, Instant>>>,
+    shard_info: Vec<ShardInfo>,
 }
 
 #[get("/api/stats")]
@@ -175,6 +187,7 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         shard_stats,
         avg_tx_confirmation_time_ms,
         avg_tx_size,
+        shard_info: data.shard_info.clone(),
     };
 
     HttpResponse::Ok().json(stats)
@@ -271,23 +284,46 @@ fn hash_to_shard(target: &str, shard_count: usize) -> usize {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // start the bootstrap node server
-    let bootstrap_node = BootstrapNode::new();
-    thread::spawn(move || {
-        bootstrap_node.start(8080);  
-    });
+    // parse command-line arguments
+    let args: Vec<String> = env::args().collect();
+    let port = args.get(1).map(|p| p.parse::<u16>().unwrap_or(8080)).unwrap_or(8080);
+    let bootstrap_port = args.get(2).map(|p| p.parse::<u16>().unwrap_or(8081)).unwrap_or(8081);
+
+    // start bootstrap node server if specified
+    if port == bootstrap_port {
+        let bootstrap_node = BootstrapNode::new();
+        thread::spawn(move || {
+            bootstrap_node.start(bootstrap_port);
+        });
+    }
+
+    // get ip address of the node
+    let ip_address = local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()).to_string();
 
     let mut shards = Vec::new();
+    let mut shard_infos = Vec::new(); 
 
-    for i in 1..=4 {
+    for i in 1..=5 {
         let mut validators = Vec::new();
         for j in 1..=NUM_VALIDATORS {
             validators.push(Validator::new(j, i));
         }
         shards.push(Shard::new(i, 100, MAX_TRANSACTIONS_PER_BLOCK, validators));
+
+        // collect shard info
+        shard_infos.push(ShardInfo {
+            id: i,
+            ip: ip_address.clone(),
+            port: port + i as u16, // assume each shard has a unique port offset by its id for now
+        });
     }
 
     let shards = Arc::new(Mutex::new(shards));
+
+    // register shards' ips and ports with the bootstrap node
+    if let Ok(mut stream) = TcpStream::connect(format!("{}:{}", ip_address, bootstrap_port)) {
+        serde_json::to_writer(&mut stream, &shard_infos).expect("Failed to send shard info to bootstrap node");
+    }
 
     let gossip_protocol = Arc::new(Mutex::new(GossipProtocol::new()));
     let transaction_start_times = Arc::new(Mutex::new(HashMap::new()));
@@ -295,6 +331,7 @@ async fn main() -> std::io::Result<()> {
     let app_state = web::Data::new(AppState { 
         shards: Arc::clone(&shards),
         transaction_start_times: Arc::clone(&transaction_start_times),
+        shard_info: shard_infos,
     });
 
     send_random_transactions(
@@ -310,7 +347,7 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(index))
             .service(actix_files::Files::new("/static", "./static").show_files_listing())
     })
-    .bind("127.0.0.1:8080")?
+    .bind(("0.0.0.0", port))? // bind to the specified port
     .run()
     .await
 }

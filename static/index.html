@@ -70,6 +70,15 @@
         .transactions-container th {
             font-weight: bold;
         }
+
+        .shard-info-container {
+            margin-top: 20px;
+            color: #ffffff;
+        }
+
+        .shard-info-container h2 {
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -89,7 +98,13 @@
         <div class="stat-card">
             <h2>Average Transaction Size</h2>
             <p id="avg-tx-size-value">Loading...</p>
-        </div>        
+        </div>
+        <div class="shard-info-container">
+            <h2>Shard Info</h2>
+            <div id="shard-info">
+                Loading...
+            </div>
+        </div>
     </div>
 
     <div class="transactions-container">
@@ -139,6 +154,15 @@
                         transactionsList.appendChild(row);
                     });
                 });
+                
+                const shardInfoContainer = document.getElementById('shard-info');
+                shardInfoContainer.innerHTML = '';
+                data.shard_info.forEach(info => {
+                    shardInfoContainer.innerHTML += `
+                        <p>Shard ${info.id}: ${info.ip}:${info.port}</p>
+                    `;
+                });
+
             } catch (error) {
                 console.error('Error fetching stats:', error);
             }

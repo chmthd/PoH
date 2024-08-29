@@ -17,11 +17,22 @@ async function fetchStats() {
                 row.innerHTML = `
                     <td>${tx.id}</td>
                     <td>${tx.status}</td>
-                    <td>${tx.block_number}</td> <!-- New block number column -->
+                    <td>${tx.block_number}</td>
+                    <td>${tx.shard_number}</td> <!-- Include Shard Number -->
                 `;
                 transactionsList.appendChild(row);
             });
         });
+
+        // display shard information
+        const shardInfoContainer = document.getElementById('shard-info');
+        shardInfoContainer.innerHTML = '';
+        data.shard_info.forEach(info => {
+            shardInfoContainer.innerHTML += `
+                <p>Shard ${info.id}: ${info.ip}:${info.port}</p>
+            `;
+        });
+
     } catch (error) {
         console.error('Error fetching stats:', error);
     }
