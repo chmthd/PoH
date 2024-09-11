@@ -79,6 +79,24 @@
         .shard-info-container h2 {
             text-align: center;
         }
+
+        .nodes-container {
+            margin-top: 20px;
+            color: #ffffff;
+        }
+
+        .nodes-container h2 {
+            text-align: center;
+        }
+
+        .nodes-container ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .nodes-container li {
+            margin: 5px 0;
+        }
     </style>
 </head>
 <body>
@@ -104,6 +122,12 @@
             <div id="shard-info">
                 Loading...
             </div>
+        </div>
+        <div class="nodes-container">
+            <h2>Registered Nodes</h2>
+            <ul id="nodes-list">
+                <li>Loading...</li>
+            </ul>
         </div>
     </div>
 
@@ -149,7 +173,7 @@
                             <td>${tx.id}</td>
                             <td>${tx.status}</td>
                             <td>${tx.block_number}</td>
-                            <td>${tx.shard_number}</td> <!-- Include Shard Number -->
+                            <td>${tx.shard_number}</td> 
                         `;
                         transactionsList.appendChild(row);
                     });
@@ -168,8 +192,31 @@
             }
         }
 
-        setInterval(fetchStats, 5000);
+        async function fetchNodes() {
+            try {
+                const response = await fetch('/api/nodes');
+                const nodes = await response.json();
+
+                const nodesList = document.getElementById('nodes-list');
+                nodesList.innerHTML = '';
+
+                nodes.forEach(node => {
+                    const listItem = document.createElement('li');
+                    listItem.innerText = `Node ${node[0]}: ${node[1]}`;
+                    nodesList.appendChild(listItem);
+                });
+            } catch (error) {
+                console.error('Error fetching nodes:', error);
+            }
+        }
+
+        setInterval(() => {
+            fetchStats();
+            fetchNodes();
+        }, 5000);
+
         fetchStats();
+        fetchNodes();
     </script>
 </body>
 </html>

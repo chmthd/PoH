@@ -18,7 +18,7 @@ async function fetchStats() {
                     <td>${tx.id}</td>
                     <td>${tx.status}</td>
                     <td>${tx.block_number}</td>
-                    <td>${tx.shard_number}</td> <!-- Include Shard Number -->
+                    <td>${tx.shard_number}</td> 
                 `;
                 transactionsList.appendChild(row);
             });
@@ -38,5 +38,30 @@ async function fetchStats() {
     }
 }
 
-setInterval(fetchStats, 5000);
+async function fetchNodes() {
+    try {
+        const response = await fetch('/api/nodes');
+        const nodes = await response.json();
+
+        console.log('Nodes received from server:', nodes); 
+
+        const nodesList = document.getElementById('nodes-list');
+        nodesList.innerHTML = '';
+
+        nodes.forEach(node => {
+            const listItem = document.createElement('li');
+            listItem.innerText = `Node ${node[0]}: ${node[1]}`;
+            nodesList.appendChild(listItem);
+        });
+    } catch (error) {
+        console.error('Error fetching nodes:', error);
+    }
+}
+
+setInterval(() => {
+    fetchStats();
+    fetchNodes();
+}, 5000);
+
 fetchStats();
+fetchNodes();

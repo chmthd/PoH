@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::thread;
 
 pub struct BootstrapNode {
-    nodes: Arc<Mutex<HashMap<String, String>>>, // store node_id -> ip:port
+    nodes: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl BootstrapNode {
@@ -18,22 +18,31 @@ impl BootstrapNode {
     pub fn start(&self, port: u16) {
         let listener = TcpListener::bind(("0.0.0.0", port)).unwrap();
 
+        println!("Bootstrap node started on port {}", port);
+
         for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            let nodes = Arc::clone(&self.nodes);
-            thread::spawn(move || {
-                handle_connection(stream, nodes);
-            });
+            match stream {
+                Ok(stream) => {
+                    let nodes = Arc::clone(&self.nodes);
+                    thread::spawn(move || {
+                        if let Err(e) = handle_connection(stream, nodes) {
+                            eprintln!("Error handling connection: {}", e);
+                        }
+                    });
+                }
+                Err(e) => eprintln!("Error accepting connection: {}", e),
+            }
         }
     }
 }
 
-fn handle_connection(mut stream: TcpStream, nodes: Arc<Mutex<HashMap<String, String>>>) {
+fn handle_connection(mut stream: TcpStream, nodes: Arc<Mutex<HashMap<String, String>>>) -> std::io::Result<()> {
     let mut buffer = [0; 512];
-    stream.read(&mut buffer).unwrap();
+    let bytes_read = stream.read(&mut buffer)?;
 
-    // extract node id and address
-    let message = String::from_utf8_lossy(&buffer[..]);
+    let message = String::from_utf8_lossy(&buffer[..bytes_read]);
+    println!("Received registration message: {}", message);
+
     let parts: Vec<&str> = message.trim().split(',').collect();
     if parts.len() == 2 {
         let node_id = parts[0].to_string();
@@ -42,14 +51,21 @@ fn handle_connection(mut stream: TcpStream, nodes: Arc<Mutex<HashMap<String, Str
         let mut nodes = nodes.lock().unwrap();
         nodes.insert(node_id.clone(), addr.clone());
 
-        println!("Registered node {}: {}", node_id, addr);
+        println!("Registered node {}: {}. Current nodes in the network:", node_id, addr);
+        for (id, addr) in &*nodes {
+            println!("  - {}: {}", id, addr);
+        }
 
-        // respond with the list of nodes
         let response: String = nodes
             .iter()
             .map(|(id, addr)| format!("{},{}", id, addr))
             .collect::<Vec<String>>()
             .join("\n");
-        stream.write(response.as_bytes()).unwrap();
+        stream.write_all(response.as_bytes())?;
+    } else {
+        println!("Invalid registration message received: {}", message);
+        stream.write_all(b"Invalid registration message")?;
     }
+
+    Ok(())
 }

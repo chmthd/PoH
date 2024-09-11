@@ -1,6 +1,6 @@
 use crate::poh::generator::PohGenerator;
 use crate::block::block::Block;
-use crate::validator::validator::Validator;
+use crate::validator::validator::{Validator, ValidatorPerformance};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -38,6 +38,7 @@ pub struct Shard {
     epoch_threshold: usize,
     processed_transactions: HashSet<String>,
     pending_cross_shard_txs: Vec<Transaction>,
+    epoch_start_time: Instant,
 }
 
 impl Shard {
@@ -58,6 +59,7 @@ impl Shard {
             epoch_threshold: 10,
             processed_transactions: HashSet::new(),
             pending_cross_shard_txs: Vec::new(),
+            epoch_start_time: Instant::now(),
         }
     }
 
@@ -144,13 +146,29 @@ impl Shard {
     }
 
     fn validate_transaction_with_validators(&mut self, transaction: &Transaction) -> bool {
+        let mut total_weight = 0.0;
+        let mut positive_weight = 0.0;
+        let current_epoch = self.epoch;
+
         for validator in self.validators.iter_mut() {
-            if !validator.validate_transaction(&transaction.id) {
-                println!("Validator {} failed to validate transaction {}", validator.id, transaction.id);
-                return false;
+            let vote = validator.validate_transaction(&transaction.id, current_epoch); 
+            let weight = validator.get_final_vote_weight(current_epoch);
+            total_weight += weight;
+
+            if vote {
+                positive_weight += weight;
+                println!("Validator {} voted positive with weight {:.2}", validator.id, weight);
+            } else {
+                println!("Validator {} voted negative with weight {:.2}", validator.id, weight);
             }
         }
-        true
+
+        println!(
+            "Shard {}: Validation result: Positive Weight: {:.2}, Total Weight: {:.2}",
+            self.id, positive_weight, total_weight
+        );
+
+        positive_weight > (total_weight * 0.5)
     }
 
     pub fn check_and_create_block(&mut self) {
@@ -166,6 +184,10 @@ impl Shard {
                 self.id, total_transactions, time_since_last_block
             );
         }
+
+        if self.check_epoch_transition() {
+            self.transition_to_next_epoch();
+        }
     }
 
     fn create_block(&mut self) {
@@ -177,37 +199,52 @@ impl Shard {
             );
             return;
         }
-    
+
         let mut transactions_to_include = Vec::new();
-    
+
         transactions_to_include.extend(self.pending_cross_shard_txs.drain(..));
         transactions_to_include.extend(self.transaction_pool.drain(..));
-    
+
         transactions_to_include.truncate(self.max_transactions_per_block);
-    
+
         for tx in transactions_to_include.iter_mut() {
             tx.status = TransactionStatus::Completed;
             println!("Transaction {} status updated to Completed.", tx.id);
         }
-    
+
         let tx_strings: Vec<String> = transactions_to_include.iter().map(|tx| tx.id.clone()).collect();
-    
-        match self.generator.generate_entries(tx_strings) {
+
+        // Collect validator performance data
+        let mut validator_performance: HashMap<usize, ValidatorPerformance> = HashMap::new();
+        for validator in &self.validators {
+            validator_performance.insert(validator.id, ValidatorPerformance::from_validator(validator));
+        }
+
+        // Generate PoH entries with validator performance data
+        match self.generator.generate_entries(tx_strings, validator_performance) {
             Ok(entries) => {
                 let block_number = self.blocks.len() as u64 + 1;
-                let previous_hash = if let Some(last_block) = self.blocks.last() {
-                    &last_block.block_hash
-                } else {
-                    "0"
-                };
-                let block = Block::new(block_number, entries, previous_hash);
-                self.blocks.push(block);
-    
+                let previous_hash = self
+                    .blocks
+                    .last()
+                    .map(|block| block.block_hash.clone())
+                    .unwrap_or_else(|| "0".to_string());
+
+                let block = Block::new(block_number, entries.clone(), &previous_hash);
+
+                self.blocks.push(block.clone());
+
                 println!(
-                    "Shard {}: Processed Block {:?} with {} transactions",
+                    "Shard {}: Processed Block #{} with {} transactions",
                     self.id,
-                    self.blocks.last().unwrap(),
+                    block.block_number,
                     transactions_to_include.len()
+                );
+                println!("Block Hash: {}", block.block_hash);
+                println!("Previous Hash: {}", previous_hash);
+                println!(
+                    "Included Transactions: {:?}",
+                    transactions_to_include.iter().map(|tx| tx.id.clone()).collect::<Vec<_>>()
                 );
             }
             Err(e) => {
@@ -216,7 +253,7 @@ impl Shard {
             }
         }
     }
-    
+
     pub fn add_pending_cross_shard_tx(&mut self, transaction: Transaction) {
         if self.processed_transactions.contains(&transaction.id) {
             println!(
@@ -237,5 +274,25 @@ impl Shard {
             self.id,
             self.pending_cross_shard_txs.len()
         );
+    }
+
+    fn check_epoch_transition(&self) -> bool {
+        self.transaction_count >= self.epoch_threshold || self.epoch_start_time.elapsed() >= Duration::from_secs(60)
+    }
+
+    fn transition_to_next_epoch(&mut self) {
+        self.epoch += 1;
+        self.epoch_start_time = Instant::now();
+        self.transaction_count = 0;
+
+        println!("Shard {}: Transitioning to epoch {}", self.id, self.epoch);
+
+        // Update epochs active for each validator
+        for validator in &mut self.validators {
+            validator.epochs_active += 1;
+        }
+
+        self.transaction_pool.clear();
+        self.processed_transactions.clear();
     }
 }
