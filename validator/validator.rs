@@ -9,10 +9,12 @@ pub struct Validator {
     pub consensus_contribution_count: usize, // number of times aligned with consensus
     pub epochs_active: usize,  // number of epochs the validator has been active
     pub penalized: bool,       // whether the validator has been penalized
+    pub final_vote_weight: f64, // the weight used in consensus
 }
 
 impl Validator {
-    pub fn new(id: usize, shard_id: usize) -> Self {
+    // New constructor with the final_vote_weight parameter
+    pub fn new(id: usize, shard_id: usize, final_vote_weight: f64) -> Self {
         Validator {
             id,
             shard_id,
@@ -23,6 +25,7 @@ impl Validator {
             consensus_contribution_count: 0,
             epochs_active: 1,  // start with 1 to prevent division by zero issues in the early epochs
             penalized: false,
+            final_vote_weight,
         }
     }
 
@@ -43,8 +46,9 @@ impl Validator {
         }
     }
 
+    // this method now includes the final_vote_weight parameter, which will affect the outcome.
     pub fn get_final_vote_weight(&self, current_epoch: usize) -> f64 {
-        // hnesty Score: fraction of successful votes
+        // honesty Score: fraction of successful votes
         let honesty_score = if self.votes_cast == 0 { 
             1.0
         } else { 
@@ -90,8 +94,8 @@ impl Validator {
             1.0 
         };
     
-        // adjust the final weight calculation for early epochs
-        let final_weight = (honesty_score 
+        // apply final_vote_weight as a multiplier to the final weight calculation
+        let final_weight = (self.final_vote_weight * honesty_score 
             * time_weight 
             * participation_score 
             * consensus_contribution_score 
@@ -106,7 +110,7 @@ impl Validator {
         );
     
         final_weight
-    }    
+    }
 
     pub fn validate_transaction(&self, transaction_id: &str, current_epoch: usize) -> bool {
         println!(
@@ -121,7 +125,6 @@ impl Validator {
     
         final_weight > validation_threshold
     }
-    
 }
 
 #[derive(Debug, Clone)]

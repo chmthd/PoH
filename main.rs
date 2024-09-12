@@ -25,7 +25,6 @@ use std::net::TcpStream;
 use local_ip_address;
 
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
-const NUM_VALIDATORS: usize = 2;
 
 #[derive(Serialize, Clone)]
 struct ShardInfo {
@@ -61,7 +60,7 @@ struct NetworkStats {
     shard_stats: Vec<ShardStats>,
     avg_tx_confirmation_time_ms: Option<u128>,
     avg_tx_size: usize,
-    shard_info: Vec<ShardInfo>, 
+    shard_info: Vec<ShardInfo>,
 }
 
 struct AppState {
@@ -314,10 +313,16 @@ fn register_with_bootstrap(bootstrap_address: &str, bootstrap_port: u16, node_id
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Parse command-line arguments
+    // Parse command-line arguments or configuration
     let args: Vec<String> = env::args().collect();
     let port = args.get(1).map(|p| p.parse::<u16>().unwrap_or(8080)).unwrap_or(8080);
     let bootstrap_port = args.get(2).map(|p| p.parse::<u16>().unwrap_or(8081)).unwrap_or(8081);
+
+    // Define the number of validators dynamically
+    let num_validators = args.get(3).map(|v| v.parse::<usize>().unwrap_or(2)).unwrap_or(2);
+
+    // Define dynamic final vote weights for validators
+    let final_vote_weight_config: Vec<f64> = vec![0.9, 0.9, 0.9, 0.9]; 
 
     // Start bootstrap node server if specified
     let nodes = Arc::new(Mutex::new(HashMap::new()));
@@ -341,10 +346,12 @@ async fn main() -> std::io::Result<()> {
     let mut shards = Vec::new();
     let mut shard_infos = Vec::new(); 
 
+    // Loop through shards and validators
     for i in 1..=5 {
         let mut validators = Vec::new();
-        for j in 1..=NUM_VALIDATORS {
-            validators.push(Validator::new(j, i));
+        for j in 1..=num_validators {
+            let final_vote_weight = final_vote_weight_config[j % final_vote_weight_config.len()]; // Assign weights dynamically
+            validators.push(Validator::new(j, i, final_vote_weight));  
         }
         shards.push(Shard::new(i, 100, MAX_TRANSACTIONS_PER_BLOCK, validators));
 
