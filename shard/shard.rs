@@ -63,6 +63,10 @@ impl Shard {
         }
     }
 
+    pub fn get_validators(&self) -> &Vec<Validator> {
+        &self.validators
+    }
+
     pub fn get_transaction_pool(&self) -> &Vec<Transaction> {
         &self.transaction_pool
     }
@@ -79,19 +83,15 @@ impl Shard {
         self.pending_cross_shard_txs.drain(..).collect()
     }
 
+    // Process intra-shard transactions
     pub fn process_transactions(&mut self, transactions: Vec<Transaction>) {
         for mut tx in transactions {
             if !self.processed_transactions.contains(&tx.id) {
                 if tx.to_shard == self.id {
-                    if self.validate_transaction_with_validators(&tx) {
-                        println!("Shard {}: Processing transaction {}", self.id, tx.id);
-                        tx.status = TransactionStatus::Processing;
-                        self.transaction_pool.push(tx.clone());
-                        self.transaction_count += 1;
-                    } else {
-                        tx.status = TransactionStatus::Failed;
-                        println!("Shard {}: Transaction {} failed validation", self.id, tx.id);
-                    }
+                    println!("Shard {}: Processing transaction {}", self.id, tx.id);
+                    tx.status = TransactionStatus::Processing;
+                    self.transaction_pool.push(tx.clone());
+                    self.transaction_count += 1;
                 }
                 self.processed_transactions.insert(tx.id.clone());
             }
@@ -107,6 +107,7 @@ impl Shard {
         }
     }
 
+    // Process cross-shard transactions
     pub fn process_cross_shard_transaction(&mut self, mut transaction: Transaction) {
         if self.processed_transactions.contains(&transaction.id) {
             println!(
@@ -116,59 +117,51 @@ impl Shard {
             return;
         }
 
-        if self.validate_transaction_with_validators(&transaction) {
-            println!(
-                "Shard {}: Processing cross-shard transaction {} from Shard {}",
-                self.id, transaction.id, transaction.from_shard
-            );
+        println!(
+            "Shard {}: Processing cross-shard transaction {} from Shard {}",
+            self.id, transaction.id, transaction.from_shard
+        );
 
-            transaction.status = TransactionStatus::Processing;
-            self.transaction_pool.push(transaction.clone());
-            self.transaction_count += 1;
-            self.processed_transactions.insert(transaction.id.clone());
+        transaction.status = TransactionStatus::Processing;
+        self.transaction_pool.push(transaction.clone());
+        self.transaction_count += 1;
+        self.processed_transactions.insert(transaction.id.clone());
 
-            if self.transaction_pool.len() >= self.min_transactions_per_block {
-                self.check_and_create_block();
-            } else {
-                println!(
-                    "Shard {}: Not enough transactions to create a block. Waiting for more transactions.",
-                    self.id
-                );
-            }
-
-            println!(
-                "Shard {}: Completed processing cross-shard transaction {}. New status: {:?}",
-                self.id, transaction.id, transaction.status
-            );
+        if self.transaction_pool.len() >= self.min_transactions_per_block {
+            self.check_and_create_block();
         } else {
-            println!("Shard {}: Cross-shard transaction {} failed validation", self.id, transaction.id);
-        }
-    }
-
-    fn validate_transaction_with_validators(&mut self, transaction: &Transaction) -> bool {
-        let mut total_weight = 0.0;
-        let mut positive_weight = 0.0;
-        let current_epoch = self.epoch;
-
-        for validator in self.validators.iter_mut() {
-            let vote = validator.validate_transaction(&transaction.id, current_epoch); 
-            let weight = validator.get_final_vote_weight(current_epoch);
-            total_weight += weight;
-
-            if vote {
-                positive_weight += weight;
-                println!("Validator {} voted positive with weight {:.2}", validator.id, weight);
-            } else {
-                println!("Validator {} voted negative with weight {:.2}", validator.id, weight);
-            }
+            println!(
+                "Shard {}: Not enough transactions to create a block. Waiting for more transactions.",
+                self.id
+            );
         }
 
         println!(
-            "Shard {}: Validation result: Positive Weight: {:.2}, Total Weight: {:.2}",
-            self.id, positive_weight, total_weight
+            "Shard {}: Completed processing cross-shard transaction {}. New status: {:?}",
+            self.id, transaction.id, transaction.status
         );
+    }
 
-        positive_weight > (total_weight * 0.5)
+    pub fn add_pending_cross_shard_tx(&mut self, transaction: Transaction) {
+        if self.processed_transactions.contains(&transaction.id) {
+            println!(
+                "Shard {}: Ignoring pending cross-shard transaction {} (already processed).",
+                self.id, transaction.id
+            );
+            return;
+        }
+
+        println!(
+            "Shard {}: Adding pending cross-shard transaction {}",
+            self.id, transaction.id
+        );
+        self.pending_cross_shard_txs.push(transaction);
+
+        println!(
+            "Shard {}: Pending cross-shard transactions count: {}",
+            self.id,
+            self.pending_cross_shard_txs.len()
+        );
     }
 
     pub fn check_and_create_block(&mut self) {
@@ -201,10 +194,8 @@ impl Shard {
         }
 
         let mut transactions_to_include = Vec::new();
-
         transactions_to_include.extend(self.pending_cross_shard_txs.drain(..));
         transactions_to_include.extend(self.transaction_pool.drain(..));
-
         transactions_to_include.truncate(self.max_transactions_per_block);
 
         for tx in transactions_to_include.iter_mut() {
@@ -232,20 +223,25 @@ impl Shard {
 
                 let block = Block::new(block_number, entries.clone(), &previous_hash);
 
-                self.blocks.push(block.clone());
+                // Validate the block before adding it to the chain
+                if self.validate_block_with_validators(&block) {
+                    self.blocks.push(block.clone());
 
-                println!(
-                    "Shard {}: Processed Block #{} with {} transactions",
-                    self.id,
-                    block.block_number,
-                    transactions_to_include.len()
-                );
-                println!("Block Hash: {}", block.block_hash);
-                println!("Previous Hash: {}", previous_hash);
-                println!(
-                    "Included Transactions: {:?}",
-                    transactions_to_include.iter().map(|tx| tx.id.clone()).collect::<Vec<_>>()
-                );
+                    println!(
+                        "Shard {}: Processed Block #{} with {} transactions",
+                        self.id,
+                        block.block_number,
+                        transactions_to_include.len()
+                    );
+                    println!("Block Hash: {}", block.block_hash);
+                    println!("Previous Hash: {}", previous_hash);
+                    println!(
+                        "Included Transactions: {:?}",
+                        transactions_to_include.iter().map(|tx| tx.id.clone()).collect::<Vec<_>>()
+                    );
+                } else {
+                    println!("Shard {}: Block #{} failed validation. Discarding block.", self.id, block_number);
+                }
             }
             Err(e) => {
                 println!("Shard {}: Error processing transactions: {}", self.id, e);
@@ -254,26 +250,29 @@ impl Shard {
         }
     }
 
-    pub fn add_pending_cross_shard_tx(&mut self, transaction: Transaction) {
-        if self.processed_transactions.contains(&transaction.id) {
-            println!(
-                "Shard {}: Ignoring pending cross-shard transaction {} (already processed).",
-                self.id, transaction.id
-            );
-            return;
+    fn validate_block_with_validators(&mut self, block: &Block) -> bool {
+        let mut total_weight = 0.0;
+        let mut positive_weight = 0.0;
+        let current_epoch = self.epoch;
+
+        for validator in self.validators.iter_mut() {
+            let weight = validator.get_final_vote_weight(current_epoch);
+            total_weight += weight;
+
+            if weight > 0.5 {
+                positive_weight += weight;
+                println!("Validator {} voted positive for block with weight {:.2}", validator.id, weight);
+            } else {
+                println!("Validator {} voted negative for block with weight {:.2}", validator.id, weight);
+            }
         }
 
         println!(
-            "Shard {}: Adding pending cross-shard transaction {}",
-            self.id, transaction.id
+            "Shard {}: Block validation result: Positive Weight: {:.2}, Total Weight: {:.2}",
+            self.id, positive_weight, total_weight
         );
-        self.pending_cross_shard_txs.push(transaction);
 
-        println!(
-            "Shard {}: Pending cross-shard transactions count: {}",
-            self.id,
-            self.pending_cross_shard_txs.len()
-        );
+        positive_weight > (total_weight * 0.5)
     }
 
     fn check_epoch_transition(&self) -> bool {
@@ -287,12 +286,34 @@ impl Shard {
 
         println!("Shard {}: Transitioning to epoch {}", self.id, self.epoch);
 
-        // Update epochs active for each validator
+        // Recalculate validator rankings
+        self.recalculate_validator_rankings();
+
+        // Assign validators based on network conditions and shard needs
+        self.dynamic_assign_validators();
+
         for validator in &mut self.validators {
             validator.epochs_active += 1;
         }
 
         self.transaction_pool.clear();
         self.processed_transactions.clear();
+    }
+
+    fn recalculate_validator_rankings(&mut self) {
+        self.validators.sort_by(|a, b| {
+            b.get_final_vote_weight(self.epoch)
+                .partial_cmp(&a.get_final_vote_weight(self.epoch))
+                .unwrap()
+        });
+
+        println!("Re-ranked validators for Shard {} at Epoch {}", self.id, self.epoch);
+    }
+
+    fn dynamic_assign_validators(&mut self) {
+        // Assess the network conditions and assign validators based on the transaction volume
+        // Load balancing and validator re-assignment logic would be added here
+
+        println!("Dynamic assignment of validators for Shard {} at Epoch {}", self.id, self.epoch);
     }
 }

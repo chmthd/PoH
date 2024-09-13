@@ -7,10 +7,10 @@ mod validator;
 use actix_files::NamedFile;
 use actix_web::{get, web, App, HttpServer, Responder, HttpResponse};
 use serde::Serialize;
-use shard::shard::{Shard, Transaction, TransactionStatus};
+use shard::shard::{Shard, Transaction, TransactionStatus};  
+use crate::validator::validator::Validator;
 use network::gossip_protocol::GossipProtocol;
 use network::bootstrap::bootstrap_node::BootstrapNode;
-use crate::validator::validator::Validator;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -43,10 +43,24 @@ struct TransactionDetail {
 }
 
 #[derive(Serialize)]
+struct ValidatorStats {
+    id: usize,
+    shard_id: usize,
+    votes_cast: usize,
+    successful_votes: usize,
+    average_response_time_ms: f64,
+    participation_count: usize,
+    consensus_contribution_count: usize,
+    epochs_active: usize,
+    final_vote_weight: f64,
+}
+
+#[derive(Serialize)]
 struct ShardStats {
     id: usize,
     transaction_pool_size: usize,
     transactions: Vec<TransactionDetail>,
+    validators: Vec<ValidatorStats>,
 }
 
 #[derive(Serialize)]
@@ -57,10 +71,11 @@ struct NetworkStats {
     avg_block_size: usize,
     transaction_pool_size: usize,
     total_cross_shard_transactions: usize,
-    shard_stats: Vec<ShardStats>,
+    avg_tx_per_block: f64, // New field for average number of transactions in a block
     avg_tx_confirmation_time_ms: Option<u128>,
     avg_tx_size: usize,
     shard_info: Vec<ShardInfo>,
+    shard_stats: Vec<ShardStats>,
 }
 
 struct AppState {
@@ -109,6 +124,7 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
 
     for shard in shards.iter() {
         let mut transactions = Vec::new();
+        let mut validators = Vec::new();
 
         for block in &shard.blocks {
             for tx in &block.poh_entries[0].transactions {
@@ -164,10 +180,25 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
             });
         }
 
+        for validator in shard.get_validators() {
+            validators.push(ValidatorStats {
+                id: validator.id,
+                shard_id: shard.id,
+                votes_cast: validator.votes_cast,
+                successful_votes: validator.successful_votes,
+                average_response_time_ms: validator.average_response_time_ms,
+                participation_count: validator.participation_count,
+                consensus_contribution_count: validator.consensus_contribution_count,
+                epochs_active: validator.epochs_active,
+                final_vote_weight: validator.final_vote_weight,
+            });
+        }
+
         shard_stats.push(ShardStats {
             id: shard.id,
             transaction_pool_size: shard.get_transaction_pool().len(),
             transactions,
+            validators,
         });
     }
 
@@ -177,6 +208,12 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         None
     };
 
+    let avg_tx_per_block = if total_blocks > 0 {
+        total_transactions as f64 / total_blocks as f64
+    } else {
+        0.0
+    };
+
     let stats = NetworkStats {
         num_shards: shards.len(),
         total_blocks,
@@ -184,10 +221,11 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         avg_block_size,
         transaction_pool_size,
         total_cross_shard_transactions,
-        shard_stats,
+        avg_tx_per_block, // Pass the calculated value
         avg_tx_confirmation_time_ms,
         avg_tx_size,
         shard_info: data.shard_info.clone(),
+        shard_stats,
     };
 
     HttpResponse::Ok().json(stats)
@@ -274,8 +312,12 @@ fn send_random_transactions(shards: Arc<Mutex<Vec<Shard>>>, gossip_protocol: Arc
             }
 
             tx_count += 1;
-            thread::sleep(Duration::from_secs(1));
 
+            // Introduce random delays between transactions to simulate varying load
+            let delay = rng.gen_range(500..3000); // Delay between 0.5 to 3 seconds
+            thread::sleep(Duration::from_millis(delay as u64));
+
+            // Periodic gossip and rebalancing every few transactions
             if tx_count % 5 == 0 {
                 gossip_protocol.lock().unwrap().periodic_gossip(&mut shards.lock().unwrap());
             }
@@ -319,7 +361,7 @@ async fn main() -> std::io::Result<()> {
     let bootstrap_port = args.get(2).map(|p| p.parse::<u16>().unwrap_or(8081)).unwrap_or(8081);
 
     // Define the number of validators dynamically
-    let num_validators = args.get(3).map(|v| v.parse::<usize>().unwrap_or(2)).unwrap_or(2);
+    let num_validators = args.get(3).map(|v| v.parse::<usize>().unwrap_or(5)).unwrap_or(5);
 
     // Define dynamic final vote weights for validators
     let final_vote_weight_config: Vec<f64> = vec![0.9, 0.9, 0.9, 0.9]; 

@@ -40,7 +40,7 @@
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         }
 
-        .transactions-container {
+        .transactions-container, .validators-container {
             border: 1px solid #666;
             border-radius: 12px;
             padding: 16px;
@@ -51,23 +51,23 @@
             overflow-y: auto;
         }
 
-        .transactions-container h2 {
+        .transactions-container h2, .validators-container h2 {
             text-align: center;
             margin-bottom: 10px;
         }
 
-        .transactions-container table {
+        table {
             width: 100%;
             border-collapse: collapse;
         }
 
-        .transactions-container th, .transactions-container td {
+        th, td {
             padding: 8px;
             text-align: left;
             border-bottom: 1px solid #444;
         }
 
-        .transactions-container th {
+        th {
             font-weight: bold;
         }
 
@@ -152,6 +152,38 @@
             </tbody>
         </table>
     </div>
+
+    <div class="validators-container">
+        <h2>Validators</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Validator ID</th>
+                    <th>Votes Cast</th>
+                    <th>Successful Votes</th>
+                    <th>Avg Response Time (ms)</th>
+                    <th>Participation Count</th>
+                    <th>Consensus Contribution</th>
+                    <th>Epochs Active</th>
+                    <th>Final Vote Weight</th>
+                </tr>
+            </thead>
+            <tbody id="validators-list">
+                <tr>
+                    <td>Loading...</td>
+                    <td>Loading...</td>
+                    <td>Loading...</td>
+                    <td>Loading...</td>
+                    <td>Loading...</td>
+                    <td>Loading...</td>
+                    <td>Loading...</td>
+                    <td>Loading...</td>
+                </tr>
+            </tbody>
+            
+        </table>
+    </div>
+
     <script>
         async function fetchStats() {
             try {
@@ -163,6 +195,7 @@
                 document.getElementById('block-size-value').innerText = `${data.avg_block_size} bytes`;
                 document.getElementById('avg-tx-size-value').innerText = `${data.avg_tx_size} bytes`;
 
+                // Update transactions
                 const transactionsList = document.getElementById('transactions-list');
                 transactionsList.innerHTML = '';
 
@@ -179,12 +212,34 @@
                     });
                 });
                 
+                // Update shard info
                 const shardInfoContainer = document.getElementById('shard-info');
                 shardInfoContainer.innerHTML = '';
                 data.shard_info.forEach(info => {
                     shardInfoContainer.innerHTML += `
                         <p>Shard ${info.id}: ${info.ip}:${info.port}</p>
                     `;
+                });
+
+                // Update validators
+                const validatorsList = document.getElementById('validators-list');
+                validatorsList.innerHTML = '';
+
+                data.shard_stats.forEach(shard => {
+                    shard.validators.forEach(validator => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${validator.id}</td>
+                            <td>${validator.honesty}</td>
+                            <td>${validator.participation}</td>
+                            <td>${validator.consensus}</td>
+                            <td>${validator.longevity}</td>
+                            <td>${validator.decay}</td>
+                            <td>${validator.final_weight}</td>
+                            <td>${validator.num_votes}</td>
+                        `;
+                        validatorsList.appendChild(row);
+                    });
                 });
 
             } catch (error) {
