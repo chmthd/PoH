@@ -25,6 +25,8 @@ use std::net::TcpStream;
 use local_ip_address;
 
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
+const BOOTSTRAP_TCP_PORT: u16 = 8081;
+const WEB_SERVER_PORT: u16 = 8090;  // Web server runs on a different port
 
 #[derive(Serialize, Clone)]
 struct ShardInfo {
@@ -71,11 +73,12 @@ struct NetworkStats {
     avg_block_size: usize,
     transaction_pool_size: usize,
     total_cross_shard_transactions: usize,
-    avg_tx_per_block: f64, // New field for average number of transactions in a block
+    avg_tx_per_block: f64,
     avg_tx_confirmation_time_ms: Option<u128>,
     avg_tx_size: usize,
     shard_info: Vec<ShardInfo>,
     shard_stats: Vec<ShardStats>,
+    nodes: Vec<(String, String)>,
 }
 
 struct AppState {
@@ -214,6 +217,9 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         0.0
     };
 
+    let nodes = data.nodes.lock().unwrap();
+    let node_list: Vec<(String, String)> = nodes.clone().into_iter().collect();
+
     let stats = NetworkStats {
         num_shards: shards.len(),
         total_blocks,
@@ -221,11 +227,12 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         avg_block_size,
         transaction_pool_size,
         total_cross_shard_transactions,
-        avg_tx_per_block, // Pass the calculated value
+        avg_tx_per_block,
         avg_tx_confirmation_time_ms,
         avg_tx_size,
         shard_info: data.shard_info.clone(),
         shard_stats,
+        nodes: node_list,
     };
 
     HttpResponse::Ok().json(stats)
@@ -286,7 +293,6 @@ fn send_random_transactions(shards: Arc<Mutex<Vec<Shard>>>, gossip_protocol: Arc
 
             gossip_protocol.lock().unwrap().gossip(&mut shards.lock().unwrap());
 
-            // logging
             {
                 let shards = shards.lock().unwrap();
                 if shards[shard_index].blocks.len() > tx_count / MAX_TRANSACTIONS_PER_BLOCK {
@@ -313,11 +319,9 @@ fn send_random_transactions(shards: Arc<Mutex<Vec<Shard>>>, gossip_protocol: Arc
 
             tx_count += 1;
 
-            // Introduce random delays between transactions to simulate varying load
-            let delay = rng.gen_range(500..3000); // Delay between 0.5 to 3 seconds
+            let delay = rng.gen_range(500..3000);
             thread::sleep(Duration::from_millis(delay as u64));
 
-            // Periodic gossip and rebalancing every few transactions
             if tx_count % 5 == 0 {
                 gossip_protocol.lock().unwrap().periodic_gossip(&mut shards.lock().unwrap());
             }
@@ -334,45 +338,39 @@ fn hash_to_shard(target: &str, shard_count: usize) -> usize {
 fn register_with_bootstrap(bootstrap_address: &str, bootstrap_port: u16, node_id: &str) -> Result<Vec<String>, std::io::Error> {
     let addr = format!("{}:{}", bootstrap_address, bootstrap_port);
     let mut stream = TcpStream::connect(addr)?;
-    
+
     let registration_message = format!("{},{}", node_id, node_id);
     stream.write_all(registration_message.as_bytes())?;
-    
+
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
-    
+
     println!("Registration response: {}", response);
-    
-    // Ensure that only valid node addresses are processed
+
     let nodes: Vec<String> = response
         .lines()
-        .filter(|line| line.contains(':')) // Ensure it's an address line
+        .filter(|line| line.contains(':'))
         .map(String::from)
         .collect();
-    
+
     Ok(nodes)
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Parse command-line arguments or configuration
     let args: Vec<String> = env::args().collect();
-    let port = args.get(1).map(|p| p.parse::<u16>().unwrap_or(8080)).unwrap_or(8080);
-    let bootstrap_port = args.get(2).map(|p| p.parse::<u16>().unwrap_or(8081)).unwrap_or(8081);
+    let port = args.get(1).map(|p| p.parse::<u16>().unwrap_or(WEB_SERVER_PORT)).unwrap_or(WEB_SERVER_PORT);
+    let bootstrap_port = args.get(2).map(|p| p.parse::<u16>().unwrap_or(BOOTSTRAP_TCP_PORT)).unwrap_or(BOOTSTRAP_TCP_PORT);
 
-    // Define the number of validators dynamically
     let num_validators = args.get(3).map(|v| v.parse::<usize>().unwrap_or(5)).unwrap_or(5);
+    let final_vote_weight_config: Vec<f64> = vec![0.9, 0.9, 0.9, 0.9];
 
-    // Define dynamic final vote weights for validators
-    let final_vote_weight_config: Vec<f64> = vec![0.9, 0.9, 0.9, 0.9]; 
-
-    // Start bootstrap node server if specified
     let nodes = Arc::new(Mutex::new(HashMap::new()));
 
-    if port == bootstrap_port {
+    if port == WEB_SERVER_PORT {
         let bootstrap_node = BootstrapNode::new();
         thread::spawn(move || {
-            bootstrap_node.start(bootstrap_port);
+            bootstrap_node.start(BOOTSTRAP_TCP_PORT);
         });
         println!("Bootstrap node is setting up. Please wait...");
         thread::sleep(Duration::from_secs(5));
@@ -382,34 +380,30 @@ async fn main() -> std::io::Result<()> {
         thread::sleep(Duration::from_secs(6));
     }
 
-    // Get IP address of the node
-    let ip_address = local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()).to_string();
-
+    let ip_address = "0.0.0.0".to_string();
     let mut shards = Vec::new();
-    let mut shard_infos = Vec::new(); 
+    let mut shard_infos = Vec::new();
 
-    // Loop through shards and validators
     for i in 1..=5 {
         let mut validators = Vec::new();
         for j in 1..=num_validators {
-            let final_vote_weight = final_vote_weight_config[j % final_vote_weight_config.len()]; // Assign weights dynamically
-            validators.push(Validator::new(j, i, final_vote_weight));  
+            let final_vote_weight = final_vote_weight_config[j % final_vote_weight_config.len()];
+            validators.push(Validator::new(j, i, final_vote_weight));
         }
         shards.push(Shard::new(i, 100, MAX_TRANSACTIONS_PER_BLOCK, validators));
 
-        // Collect shard info
         shard_infos.push(ShardInfo {
             id: i,
             ip: ip_address.clone(),
-            port: port + i as u16, // Assume each shard has a unique port offset by its id for now
+            port: port + i as u16,
         });
     }
 
     let shards = Arc::new(Mutex::new(shards));
 
-    // Register the node with the bootstrap node
     let node_id = format!("{}:{}", ip_address, port);
-    let known_nodes = match register_with_bootstrap(&ip_address, bootstrap_port, &node_id) {
+    let bootstrap_address = if port == BOOTSTRAP_TCP_PORT { "localhost" } else { "bootstrap" };
+    let known_nodes = match register_with_bootstrap(bootstrap_address, bootstrap_port, &node_id) {
         Ok(nodes) => {
             println!("Successfully registered with bootstrap node. Known nodes: {:?}", nodes);
             nodes
@@ -423,17 +417,15 @@ async fn main() -> std::io::Result<()> {
     let gossip_protocol = Arc::new(Mutex::new(GossipProtocol::new()));
     let transaction_start_times = Arc::new(Mutex::new(HashMap::new()));
 
-    let app_state = web::Data::new(AppState { 
+    let app_state = web::Data::new(AppState {
         shards: Arc::clone(&shards),
         transaction_start_times: Arc::clone(&transaction_start_times),
         shard_info: shard_infos,
         nodes: Arc::clone(&nodes),
     });
 
-    // Establish connections with other known nodes
     for known_node in known_nodes {
         println!("Connecting to known node: {}", known_node);
-        //
     }
 
     send_random_transactions(
@@ -450,7 +442,7 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(index))
             .service(actix_files::Files::new("/static", "./static").show_files_listing())
     })
-    .bind(("0.0.0.0", port))?
+    .bind(("0.0.0.0", WEB_SERVER_PORT))?
     .run()
     .await
 }

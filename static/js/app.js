@@ -26,7 +26,7 @@ async function fetchStats() {
             });
         });
 
-        // Display shard information
+        // Update shard info
         const shardInfoContainer = document.getElementById('shard-info');
         shardInfoContainer.innerHTML = '';
         data.shard_info.forEach(info => {
@@ -66,7 +66,7 @@ async function fetchNodes() {
         const response = await fetch('/api/nodes');
         const nodes = await response.json();
 
-        console.log('Nodes received from server:', nodes); 
+        console.log('Nodes received from server:', nodes);
 
         const nodesList = document.getElementById('nodes-list');
         nodesList.innerHTML = '';

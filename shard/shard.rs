@@ -254,11 +254,11 @@ impl Shard {
         let mut total_weight = 0.0;
         let mut positive_weight = 0.0;
         let current_epoch = self.epoch;
-
+    
         for validator in self.validators.iter_mut() {
             let weight = validator.get_final_vote_weight(current_epoch);
             total_weight += weight;
-
+    
             if weight > 0.5 {
                 positive_weight += weight;
                 println!("Validator {} voted positive for block with weight {:.2}", validator.id, weight);
@@ -266,14 +266,15 @@ impl Shard {
                 println!("Validator {} voted negative for block with weight {:.2}", validator.id, weight);
             }
         }
-
+    
         println!(
             "Shard {}: Block validation result: Positive Weight: {:.2}, Total Weight: {:.2}",
             self.id, positive_weight, total_weight
         );
-
-        positive_weight > (total_weight * 0.5)
-    }
+    
+        // Lower the threshold to 0.3 for now
+        positive_weight > (total_weight * 0.3)
+    }    
 
     fn check_epoch_transition(&self) -> bool {
         self.transaction_count >= self.epoch_threshold || self.epoch_start_time.elapsed() >= Duration::from_secs(60)

@@ -51,36 +51,31 @@ impl Validator {
         } else {
             self.successful_votes as f64 / self.votes_cast as f64
         };
-
+    
         let time_weight = 1.0 / (self.average_response_time_ms + 1.0);
-
+    
+        // Temporary participation score adjustment to avoid zero
         let participation_score = if current_epoch == 0 {
             1.0
+        } else if self.participation_count == 0 {
+            0.5  // Ensure a non-zero score
         } else {
             self.participation_count as f64 / current_epoch as f64
         };
-
+    
         let consensus_contribution_score = if self.participation_count == 0 {
             1.0
         } else {
             self.consensus_contribution_count as f64 / self.participation_count as f64
         };
-
-        let longevity_score = if current_epoch == 0 {
-            1.0
-        } else {
-            self.epochs_active as f64 / current_epoch as f64
-        };
-
-        let decay_factor = if current_epoch > self.epochs_active {
-            let age = current_epoch - self.epochs_active;
-            1.0 / (1.0 + (age as f64 * 0.05).exp())
-        } else {
-            1.0
-        };
-
+    
+        // Longevity and decay factors remain disabled
+        let longevity_score = 1.0;
+        let decay_factor = 1.0;
+    
         let integrity_penalty = if self.penalized { 0.5 } else { 1.0 };
-
+    
+        // Calculate the final vote weight
         let final_weight = (self.final_vote_weight * honesty_score
             * time_weight
             * participation_score
@@ -89,14 +84,15 @@ impl Validator {
             * decay_factor
             * integrity_penalty)
             .max(0.3);
-
+    
         println!(
-            "Validator {} (Shard {}): Honesty: {:.2}, Time: {:.2}, Participation: {:.2}, Consensus: {:.2}, Longevity: {:.2}, Decay: {:.2}, Final Weight: {:.2}",
+            "Validator {} (Shard {}): Honesty: {:.2}, Time: {:.2}, Participation: {:.2}, Consensus: {:.2}, Longevity (Disabled): {:.2}, Decay (Disabled): {:.2}, Final Weight: {:.2}",
             self.id, self.shard_id, honesty_score, time_weight, participation_score, consensus_contribution_score, longevity_score, decay_factor, final_weight
         );
-
+    
         final_weight
     }
+    
 
     pub fn validate_transaction(&self, transaction_id: &str, current_epoch: usize) -> bool {
         println!(
