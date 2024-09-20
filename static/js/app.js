@@ -9,6 +9,17 @@ async function fetchStats() {
         document.getElementById('block-size-value').innerText = `${data.avg_block_size} bytes`;
         document.getElementById('avg-tx-size-value').innerText = `${data.avg_tx_size} bytes`;
 
+        // Update new metrics for block generation and propagation times
+        document.getElementById('avg-block-gen-time').innerText = data.avg_block_gen_time_ms
+            ? `${data.avg_block_gen_time_ms.toFixed(2)} ms`
+            : 'N/A';
+        document.getElementById('avg-block-prop-time').innerText = data.avg_block_prop_time_ms
+            ? `${data.avg_block_prop_time_ms.toFixed(2)} ms`
+            : 'N/A';
+        document.getElementById('avg-epoch-time').innerText = data.avg_epoch_time_ms
+            ? `${data.avg_epoch_time_ms.toFixed(2)} ms`
+            : 'N/A';
+
         // Update transactions
         const transactionsList = document.getElementById('transactions-list');
         transactionsList.innerHTML = '';
@@ -54,6 +65,22 @@ async function fetchStats() {
                 `;
                 validatorsList.appendChild(row);
             });
+        });
+
+        // Update checkpoint information
+        const checkpointList = document.getElementById('checkpoints-list');
+        checkpointList.innerHTML = '';
+        data.shard_stats.forEach(shard => {
+            if (shard.checkpoint) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>Shard ${shard.checkpoint.shard_id}</td>
+                    <td>${shard.checkpoint.block_height}</td>
+                    <td>${shard.checkpoint.transaction_pool_size}</td>
+                    <td>${shard.checkpoint.processed_transaction_count}</td>
+                `;
+                checkpointList.appendChild(row);
+            }
         });
 
     } catch (error) {

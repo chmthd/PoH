@@ -1,4 +1,4 @@
-use crate::shard::shard::{Shard, Transaction};
+use crate::shard::shard::{Shard, Transaction, Checkpoint};
 
 pub struct GossipProtocol {
     pub known_shards: Vec<usize>,
@@ -34,5 +34,23 @@ impl GossipProtocol {
     pub fn periodic_gossip(&mut self, shards: &mut [Shard]) {
         println!("Performing periodic gossip...");
         self.gossip(shards);
+    }
+
+    // Handle checkpoint gossiping across shards
+    pub fn gossip_checkpoints(&mut self, checkpoint: &Checkpoint, shards: &mut [Shard]) {
+        println!(
+            "Gossip: Broadcasting checkpoint from Shard {} to other shards",
+            checkpoint.shard_id
+        );
+
+        for shard in shards.iter_mut() {
+            if shard.id != checkpoint.shard_id {
+                println!(
+                    "Gossip: Sending checkpoint from Shard {} to Shard {}",
+                    checkpoint.shard_id, shard.id
+                );
+                shard.receive_checkpoint(checkpoint.clone());
+            }
+        }
     }
 }

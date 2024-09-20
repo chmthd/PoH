@@ -16,9 +16,7 @@ impl BootstrapNode {
     }
 
     pub fn start(&self, port: u16) {
-        // Bind to all network interfaces, so it works within Docker
         let listener = TcpListener::bind(("0.0.0.0", port)).unwrap();
-
         println!("Bootstrap node started on port {}", port);
 
         for stream in listener.incoming() {
@@ -57,7 +55,6 @@ fn handle_connection(mut stream: TcpStream, nodes: Arc<Mutex<HashMap<String, Str
             println!("  - {}: {}", id, addr);
         }
 
-        // Send back the known nodes to the newly registered node
         let response: String = nodes
             .iter()
             .map(|(id, addr)| format!("{},{}", id, addr))

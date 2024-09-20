@@ -4,6 +4,34 @@ use crate::validator::validator::{Validator, ValidatorPerformance};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+// Define the Checkpoint struct
+#[derive(Debug, Clone)]
+pub struct Checkpoint {
+    pub shard_id: usize,
+    pub block_height: u64,
+    pub ledger_snapshot: HashMap<String, u64>,
+    pub transaction_pool_snapshot: Vec<Transaction>,
+    pub processed_transactions_snapshot: HashSet<String>,
+}
+
+impl Checkpoint {
+    pub fn new(
+        shard_id: usize,
+        block_height: u64,
+        ledger_snapshot: HashMap<String, u64>,
+        transaction_pool_snapshot: Vec<Transaction>,
+        processed_transactions_snapshot: HashSet<String>,
+    ) -> Self {
+        Checkpoint {
+            shard_id,
+            block_height,
+            ledger_snapshot,
+            transaction_pool_snapshot,
+            processed_transactions_snapshot,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Transaction {
     pub id: String,
@@ -25,7 +53,7 @@ pub enum TransactionStatus {
 pub struct Shard {
     pub id: usize,
     generator: PohGenerator,
-    epoch: usize,
+    pub epoch: usize,
     transaction_count: usize,
     transaction_pool: Vec<Transaction>,
     ledger: HashMap<String, u64>,
@@ -38,7 +66,8 @@ pub struct Shard {
     epoch_threshold: usize,
     processed_transactions: HashSet<String>,
     pending_cross_shard_txs: Vec<Transaction>,
-    epoch_start_time: Instant,
+    pub epoch_start_time: Instant,
+    pub pending_checkpoint: Option<Checkpoint>, 
 }
 
 impl Shard {
@@ -52,14 +81,15 @@ impl Shard {
             ledger: HashMap::new(),
             blocks: Vec::new(),
             validators,
-            min_transactions_per_block: 10,
+            min_transactions_per_block: 50,  
             max_transactions_per_block,
             last_block_time: Instant::now(),
-            block_time_threshold: Duration::from_secs(10),
-            epoch_threshold: 10,
+            block_time_threshold: Duration::from_secs(30), 
+            epoch_threshold: 3000,
             processed_transactions: HashSet::new(),
             pending_cross_shard_txs: Vec::new(),
             epoch_start_time: Instant::now(),
+            pending_checkpoint: None,
         }
     }
 
@@ -97,14 +127,7 @@ impl Shard {
             }
         }
 
-        if self.transaction_pool.len() >= self.min_transactions_per_block {
-            self.check_and_create_block();
-        } else {
-            println!(
-                "Shard {}: Not enough transactions to create a block. Waiting for more transactions.",
-                self.id
-            );
-        }
+        self.check_and_create_block();
     }
 
     // Process cross-shard transactions
@@ -127,21 +150,10 @@ impl Shard {
         self.transaction_count += 1;
         self.processed_transactions.insert(transaction.id.clone());
 
-        if self.transaction_pool.len() >= self.min_transactions_per_block {
-            self.check_and_create_block();
-        } else {
-            println!(
-                "Shard {}: Not enough transactions to create a block. Waiting for more transactions.",
-                self.id
-            );
-        }
-
-        println!(
-            "Shard {}: Completed processing cross-shard transaction {}. New status: {:?}",
-            self.id, transaction.id, transaction.status
-        );
+        self.check_and_create_block();
     }
 
+    // Add the pending cross-shard transaction to the queue
     pub fn add_pending_cross_shard_tx(&mut self, transaction: Transaction) {
         if self.processed_transactions.contains(&transaction.id) {
             println!(
@@ -168,18 +180,43 @@ impl Shard {
         let total_transactions = self.transaction_pool.len() + self.pending_cross_shard_txs.len();
         let time_since_last_block = self.last_block_time.elapsed();
 
-        if total_transactions >= self.min_transactions_per_block && time_since_last_block >= self.block_time_threshold {
+        // Check if time has passed since the last block creation
+        if time_since_last_block >= self.block_time_threshold {
+            println!("Shard {}: Block time threshold exceeded. Creating block.", self.id);
+            self.create_block();
+            self.last_block_time = Instant::now();
+            return;
+        }
+
+        // If block time hasn't passed, check if there are enough transactions
+        let dynamic_min_transactions = self.calculate_dynamic_min_transactions(total_transactions);
+
+        if total_transactions >= dynamic_min_transactions {
+            println!("Shard {}: Min transaction threshold reached. Creating block.", self.id);
             self.create_block();
             self.last_block_time = Instant::now();
         } else {
             println!(
-                "Shard {}: Not enough transactions or time not yet reached. Current pool size: {}, Time since last block: {:?}",
-                self.id, total_transactions, time_since_last_block
+                "Shard {}: Waiting for more transactions or block time threshold. Current pool size: {}.",
+                self.id, total_transactions
             );
         }
 
         if self.check_epoch_transition() {
             self.transition_to_next_epoch();
+        }
+    }
+
+    fn calculate_dynamic_min_transactions(&self, total_transactions: usize) -> usize {
+        if total_transactions > 100 {
+            100 // High traffic: larger blocks
+        } else if total_transactions > 50 {
+            (self.max_transactions_per_block as f64 * 0.8) as usize // 80% of max
+        } else if total_transactions > 20 {
+            (self.max_transactions_per_block as f64 * 0.5) as usize // 50% of max
+        } else {
+            self.min_transactions_per_block // Use the dynamic minimum from the configuration
+
         }
     }
 
@@ -205,13 +242,11 @@ impl Shard {
 
         let tx_strings: Vec<String> = transactions_to_include.iter().map(|tx| tx.id.clone()).collect();
 
-        // Collect validator performance data
         let mut validator_performance: HashMap<usize, ValidatorPerformance> = HashMap::new();
         for validator in &self.validators {
             validator_performance.insert(validator.id, ValidatorPerformance::from_validator(validator));
         }
 
-        // Generate PoH entries with validator performance data
         match self.generator.generate_entries(tx_strings, validator_performance) {
             Ok(entries) => {
                 let block_number = self.blocks.len() as u64 + 1;
@@ -223,7 +258,6 @@ impl Shard {
 
                 let block = Block::new(block_number, entries.clone(), &previous_hash);
 
-                // Validate the block before adding it to the chain
                 if self.validate_block_with_validators(&block) {
                     self.blocks.push(block.clone());
 
@@ -250,47 +284,69 @@ impl Shard {
         }
     }
 
-    fn validate_block_with_validators(&mut self, block: &Block) -> bool {
+    // Validate block with validators
+    pub fn validate_block_with_validators(&mut self, block: &Block) -> bool {
         let mut total_weight = 0.0;
         let mut positive_weight = 0.0;
         let current_epoch = self.epoch;
-    
+
         for validator in self.validators.iter_mut() {
             let weight = validator.get_final_vote_weight(current_epoch);
             total_weight += weight;
-    
-            if weight > 0.5 {
+
+            if weight > 0.2 {
                 positive_weight += weight;
                 println!("Validator {} voted positive for block with weight {:.2}", validator.id, weight);
             } else {
                 println!("Validator {} voted negative for block with weight {:.2}", validator.id, weight);
             }
         }
-    
+
         println!(
             "Shard {}: Block validation result: Positive Weight: {:.2}, Total Weight: {:.2}",
             self.id, positive_weight, total_weight
         );
-    
-        // Lower the threshold to 0.3 for now
-        positive_weight > (total_weight * 0.3)
-    }    
 
-    fn check_epoch_transition(&self) -> bool {
-        self.transaction_count >= self.epoch_threshold || self.epoch_start_time.elapsed() >= Duration::from_secs(60)
+        positive_weight > (total_weight * 0.3)
     }
 
-    fn transition_to_next_epoch(&mut self) {
+    // Drain pending checkpoint for cross-shard gossip
+    pub fn drain_pending_checkpoint(&mut self) -> Option<Checkpoint> {
+        self.pending_checkpoint.take()
+    }
+
+    // Receive and process checkpoint from other shards
+    pub fn receive_checkpoint(&mut self, checkpoint: Checkpoint) {
+        println!("Shard {}: Received checkpoint from Shard {}", self.id, checkpoint.shard_id);
+        self.ledger = checkpoint.ledger_snapshot;
+        self.processed_transactions = checkpoint.processed_transactions_snapshot;
+        self.transaction_pool = checkpoint.transaction_pool_snapshot;
+        self.blocks.clear();
+    }
+
+    pub fn capture_checkpoint(&self) -> Checkpoint {
+        Checkpoint::new(
+            self.id,
+            self.blocks.len() as u64,
+            self.ledger.clone(),
+            self.transaction_pool.clone(),
+            self.processed_transactions.clone(),
+        )
+    }
+
+    pub fn check_epoch_transition(&self) -> bool {
+        self.transaction_count >= self.epoch_threshold || self.epoch_start_time.elapsed() >= Duration::from_secs(30)
+    }
+
+    pub fn transition_to_next_epoch(&mut self) {
         self.epoch += 1;
         self.epoch_start_time = Instant::now();
         self.transaction_count = 0;
 
         println!("Shard {}: Transitioning to epoch {}", self.id, self.epoch);
 
-        // Recalculate validator rankings
         self.recalculate_validator_rankings();
 
-        // Assign validators based on network conditions and shard needs
         self.dynamic_assign_validators();
 
         for validator in &mut self.validators {
@@ -312,9 +368,6 @@ impl Shard {
     }
 
     fn dynamic_assign_validators(&mut self) {
-        // Assess the network conditions and assign validators based on the transaction volume
-        // Load balancing and validator re-assignment logic would be added here
-
         println!("Dynamic assignment of validators for Shard {} at Epoch {}", self.id, self.epoch);
     }
 }

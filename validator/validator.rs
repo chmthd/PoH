@@ -28,6 +28,13 @@ impl Validator {
         }
     }
 
+    // Adjust the final vote weight based on dynamic conditions
+    pub fn adjust_weight(&mut self, factor: f64) {
+        self.final_vote_weight *= factor;
+        self.final_vote_weight = self.final_vote_weight.clamp(0.3, 1.0); // Clamp to a minimum of 0.3 and maximum of 1.0
+        println!("Validator {} adjusted weight to {:.2}", self.id, self.final_vote_weight);
+    }
+
     pub fn cast_vote(&mut self, is_successful: bool, response_time: u128, aligns_with_consensus: bool) {
         self.votes_cast += 1;
 
@@ -92,7 +99,6 @@ impl Validator {
     
         final_weight
     }
-    
 
     pub fn validate_transaction(&self, transaction_id: &str, current_epoch: usize) -> bool {
         println!(
