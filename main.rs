@@ -26,9 +26,7 @@ use std::net::TcpStream;
 #[macro_use]
 extern crate lazy_static;
 
-const MIN_TRANSACTIONS_PER_BLOCK: usize = 10;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 3000;
-const BLOCK_TIME_THRESHOLD: Duration = Duration::from_secs(30);  // Updated block time threshold
 const BOOTSTRAP_TCP_PORT: u16 = 8081;
 const WEB_SERVER_PORT: u16 = 8090;
 
@@ -67,7 +65,8 @@ struct ShardStats {
     transaction_pool_size: usize,
     transactions: Vec<TransactionDetail>,
     validators: Vec<ValidatorStats>,
-    checkpoint: Option<CheckpointDetail>, // Added checkpoint details
+    checkpoint: Option<CheckpointDetail>,
+    block_count: usize, // Add block count for each shard
 }
 
 #[derive(Serialize)]
@@ -83,10 +82,11 @@ struct NetworkStats {
     avg_tx_size: usize,
     avg_block_gen_time_ms: Option<f64>,
     avg_block_prop_time_ms: Option<f64>,
-    avg_epoch_time_ms: Option<f64>, // Added average epoch time field
+    avg_epoch_time_ms: Option<f64>,
     shard_info: Vec<ShardInfo>,
     shard_stats: Vec<ShardStats>,
     nodes: Vec<(String, String)>,
+    uptime: u64, // Track network uptime
 }
 
 #[derive(Serialize)]
@@ -98,14 +98,7 @@ struct CheckpointDetail {
 }
 
 lazy_static! {
-    static ref METRICS: Mutex<PersistentMetrics> = Mutex::new(PersistentMetrics::default());
-}
-
-#[derive(Default)]
-struct PersistentMetrics {
-    total_blocks: usize,
-    total_transactions: usize,
-    avg_block_size: usize,
+    static ref BLOCK_GEN_TIMES: Mutex<Vec<Duration>> = Mutex::new(Vec::new());
 }
 
 struct AppState {
@@ -115,6 +108,7 @@ struct AppState {
     block_prop_times: Arc<Mutex<Vec<Duration>>>,
     shard_info: Vec<ShardInfo>,
     nodes: Arc<Mutex<HashMap<String, String>>>,
+    start_time: Instant,  // Add network start time for uptime calculation
 }
 
 #[get("/api/stats")]
@@ -162,22 +156,31 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
 
         for block in &shard.blocks {
             for tx in &block.poh_entries[0].transactions {
-                let status = String::from("Completed");
-                let block_number = block.block_number.to_string();
-                let shard_number = shard.id;
-                let processing_time_ms = tx_start_times.get(tx).map(|start_time| start_time.elapsed().as_millis());
+                if let Some(transaction) = shard.get_transaction_by_id(tx) {
+                    let status = if transaction.status == TransactionStatus::Completed {
+                        String::from("Completed")
+                    } else {
+                        String::from("Pending")
+                    };
 
-                transactions.push(TransactionDetail {
-                    id: tx.clone(),
-                    status,
-                    processing_time_ms,
-                    block_number,
-                    shard_number,
-                });
+                    let block_number = block.block_number.to_string();
+                    let shard_number = shard.id;
+                    let processing_time_ms = tx_start_times.get(&transaction.id).map(|start_time| start_time.elapsed().as_millis());
 
-                if let Some(duration) = processing_time_ms {
-                    total_confirmation_time += duration;
-                    confirmed_tx_count += 1;
+                    transactions.push(TransactionDetail {
+                        id: transaction.id.clone(),
+                        status,
+                        processing_time_ms,
+                        block_number,
+                        shard_number,
+                    });
+
+                    if transaction.status == TransactionStatus::Completed {
+                        if let Some(duration) = processing_time_ms {
+                            total_confirmation_time += duration;
+                            confirmed_tx_count += 1;
+                        }
+                    }
                 }
             }
         }
@@ -228,7 +231,6 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
             });
         }
 
-        // Capture checkpoint details for UI
         let checkpoint_detail = shard.pending_checkpoint.as_ref().map(|cp| CheckpointDetail {
             shard_id: cp.shard_id,
             block_height: cp.block_height,
@@ -242,6 +244,7 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
             transactions,
             validators,
             checkpoint: checkpoint_detail,
+            block_count: shard.blocks.len(),  // Include block count
         });
     }
 
@@ -251,11 +254,16 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         None
     };
 
-    let avg_block_gen_time_ms = if !block_gen_times.is_empty() {
-        Some(block_gen_times.iter().map(|t| t.as_millis()).sum::<u128>() as f64 / block_gen_times.len() as f64)
-    } else {
-        None
+    let avg_block_gen_time_ms = {
+        let gen_times = BLOCK_GEN_TIMES.lock().unwrap();
+        if !gen_times.is_empty() {
+            let total_gen_time: u128 = gen_times.iter().map(|t| t.as_millis()).sum();
+            Some(total_gen_time as f64 / gen_times.len() as f64)
+        } else {
+            None
+        }
     };
+    
 
     let avg_block_prop_time_ms = if !block_prop_times.is_empty() {
         Some(block_prop_times.iter().map(|t| t.as_millis()).sum::<u128>() as f64 / block_prop_times.len() as f64)
@@ -272,7 +280,6 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
     let nodes = data.nodes.lock().unwrap();
     let node_list: Vec<(String, String)> = nodes.clone().into_iter().collect();
 
-    // Calculate average epoch time
     let avg_epoch_time_ms = {
         let epoch_times: Vec<f64> = shards
             .iter()
@@ -285,17 +292,14 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         }
     };
 
-    // Updating metrics
-    let mut metrics = METRICS.lock().unwrap();
-    metrics.total_blocks += total_blocks;
-    metrics.total_transactions += total_transactions;
-    metrics.avg_block_size = (metrics.avg_block_size + avg_block_size) / 2;
+    // Calculate network uptime
+    let uptime = data.start_time.elapsed().as_secs();
 
     let stats = NetworkStats {
         num_shards: shards.len(),
-        total_blocks: metrics.total_blocks,
-        total_transactions: metrics.total_transactions,
-        avg_block_size: metrics.avg_block_size,
+        total_blocks,
+        total_transactions,
+        avg_block_size,
         transaction_pool_size,
         total_cross_shard_transactions,
         avg_tx_per_block,
@@ -303,10 +307,11 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         avg_tx_size,
         avg_block_gen_time_ms,
         avg_block_prop_time_ms,
-        avg_epoch_time_ms, // Pass epoch time to frontend
+        avg_epoch_time_ms,
         shard_info: data.shard_info.clone(),
         shard_stats,
         nodes: node_list,
+        uptime,  // Include uptime in stats
     };
 
     HttpResponse::Ok().json(stats)
@@ -323,7 +328,6 @@ async fn index() -> impl Responder {
     NamedFile::open("./static/index.html").unwrap()
 }
 
-// Function to send random transactions and handle epoch transitions and checkpoint propagation
 fn send_random_transactions(
     shards: Arc<Mutex<Vec<Shard>>>,
     gossip_protocol: Arc<Mutex<GossipProtocol>>,
@@ -334,7 +338,6 @@ fn send_random_transactions(
     thread::spawn(move || {
         let mut rng = rand::thread_rng();
         let mut tx_count = 1;
-        let mut block_start_time = Instant::now();
         let mut log_file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -342,7 +345,7 @@ fn send_random_transactions(
             .expect("Cannot open log file");
 
         loop {
-            let transaction_batch_size = rng.gen_range(1..2); // Send multiple transactions at once
+            let transaction_batch_size = rng.gen_range(1..2);
             for _ in 0..transaction_batch_size {
                 let amount = rng.gen_range(1..1000);
                 let shard_index = rng.gen_range(0..shards.lock().unwrap().len());
@@ -365,13 +368,11 @@ fn send_random_transactions(
                     transaction.id, transaction.from_shard, transaction.to_shard, transaction.status
                 );
 
-                {
-                    let mut shards = shards.lock().unwrap();
-                    if transaction.from_shard == transaction.to_shard {
-                        shards[shard_index].process_transactions(vec![transaction.clone()]);
-                    } else {
-                        shards[shard_index].add_pending_cross_shard_tx(transaction.clone());
-                    }
+                let mut shards = shards.lock().unwrap();
+                if transaction.from_shard == transaction.to_shard {
+                    shards[shard_index].process_transactions(vec![transaction.clone()]);
+                } else {
+                    shards[shard_index].add_pending_cross_shard_tx(transaction.clone());
                 }
 
                 tx_count += 1;
@@ -379,8 +380,7 @@ fn send_random_transactions(
 
             gossip_protocol.lock().unwrap().gossip(&mut shards.lock().unwrap());
 
-            // Adjust the delay to simulate more transactions per second
-            let delay = rng.gen_range(500..1000); // Decrease delay to increase load
+            let delay = rng.gen_range(200..500);
             thread::sleep(Duration::from_millis(delay as u64));
 
             if tx_count % 5 == 0 {
@@ -390,7 +390,6 @@ fn send_random_transactions(
                 block_prop_times.lock().unwrap().push(prop_time);
             }
 
-            // Simulate epoch transitions and checkpoint creation
             let checkpoints: Vec<Checkpoint> = {
                 let mut shards_locked = shards.lock().unwrap();
                 let mut created_checkpoints = Vec::new();
@@ -405,7 +404,6 @@ fn send_random_transactions(
                 created_checkpoints
             };
 
-            // Now handle checkpoint gossiping after unlocking shards
             for checkpoint in checkpoints {
                 gossip_protocol.lock().unwrap().gossip_checkpoints(&checkpoint, &mut shards.lock().unwrap());
             }
@@ -510,6 +508,7 @@ async fn main() -> std::io::Result<()> {
         block_prop_times: Arc::clone(&block_prop_times),
         shard_info: shard_infos,
         nodes: Arc::clone(&nodes),
+        start_time: Instant::now(),  // Initialize start time here
     });
 
     for known_node in known_nodes {
@@ -523,7 +522,7 @@ async fn main() -> std::io::Result<()> {
         Arc::clone(&block_gen_times),
         Arc::clone(&block_prop_times),
     );
-
+    
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())

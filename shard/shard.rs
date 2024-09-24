@@ -3,8 +3,8 @@ use crate::block::block::Block;
 use crate::validator::validator::{Validator, ValidatorPerformance};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+use crate::BLOCK_GEN_TIMES;
 
-// Define the Checkpoint struct
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
     pub shard_id: usize,
@@ -67,7 +67,7 @@ pub struct Shard {
     processed_transactions: HashSet<String>,
     pending_cross_shard_txs: Vec<Transaction>,
     pub epoch_start_time: Instant,
-    pub pending_checkpoint: Option<Checkpoint>, 
+    pub pending_checkpoint: Option<Checkpoint>,
 }
 
 impl Shard {
@@ -81,10 +81,10 @@ impl Shard {
             ledger: HashMap::new(),
             blocks: Vec::new(),
             validators,
-            min_transactions_per_block: 50,  
+            min_transactions_per_block: 100,
             max_transactions_per_block,
             last_block_time: Instant::now(),
-            block_time_threshold: Duration::from_secs(30), 
+            block_time_threshold: Duration::from_secs(30),
             epoch_threshold: 3000,
             processed_transactions: HashSet::new(),
             pending_cross_shard_txs: Vec::new(),
@@ -101,8 +101,11 @@ impl Shard {
         &self.transaction_pool
     }
 
-    pub fn get_processed_transactions(&self) -> &HashSet<String> {
-        &self.processed_transactions
+    // Modified to return only completed transactions
+    pub fn get_processed_transactions(&self) -> Vec<&Transaction> {
+        self.transaction_pool.iter()
+            .filter(|tx| tx.status == TransactionStatus::Completed)
+            .collect()
     }
 
     pub fn get_pending_cross_shard_txs_len(&self) -> usize {
@@ -113,7 +116,10 @@ impl Shard {
         self.pending_cross_shard_txs.drain(..).collect()
     }
 
-    // Process intra-shard transactions
+    pub fn get_transaction_by_id(&self, tx_id: &str) -> Option<&Transaction> {
+        self.transaction_pool.iter().find(|tx| tx.id == tx_id)
+    }
+
     pub fn process_transactions(&mut self, transactions: Vec<Transaction>) {
         for mut tx in transactions {
             if !self.processed_transactions.contains(&tx.id) {
@@ -130,7 +136,6 @@ impl Shard {
         self.check_and_create_block();
     }
 
-    // Process cross-shard transactions
     pub fn process_cross_shard_transaction(&mut self, mut transaction: Transaction) {
         if self.processed_transactions.contains(&transaction.id) {
             println!(
@@ -153,7 +158,6 @@ impl Shard {
         self.check_and_create_block();
     }
 
-    // Add the pending cross-shard transaction to the queue
     pub fn add_pending_cross_shard_tx(&mut self, transaction: Transaction) {
         if self.processed_transactions.contains(&transaction.id) {
             println!(
@@ -180,7 +184,6 @@ impl Shard {
         let total_transactions = self.transaction_pool.len() + self.pending_cross_shard_txs.len();
         let time_since_last_block = self.last_block_time.elapsed();
 
-        // Check if time has passed since the last block creation
         if time_since_last_block >= self.block_time_threshold {
             println!("Shard {}: Block time threshold exceeded. Creating block.", self.id);
             self.create_block();
@@ -188,7 +191,6 @@ impl Shard {
             return;
         }
 
-        // If block time hasn't passed, check if there are enough transactions
         let dynamic_min_transactions = self.calculate_dynamic_min_transactions(total_transactions);
 
         if total_transactions >= dynamic_min_transactions {
@@ -208,15 +210,14 @@ impl Shard {
     }
 
     fn calculate_dynamic_min_transactions(&self, total_transactions: usize) -> usize {
-        if total_transactions > 100 {
-            100 // High traffic: larger blocks
-        } else if total_transactions > 50 {
-            (self.max_transactions_per_block as f64 * 0.8) as usize // 80% of max
-        } else if total_transactions > 20 {
-            (self.max_transactions_per_block as f64 * 0.5) as usize // 50% of max
+        if total_transactions > 2000 {
+            2000
+        } else if total_transactions > 1000 {
+            (self.max_transactions_per_block as f64 * 0.6) as usize
+        } else if total_transactions > 500 {
+            (self.max_transactions_per_block as f64 * 0.3) as usize
         } else {
-            self.min_transactions_per_block // Use the dynamic minimum from the configuration
-
+            self.min_transactions_per_block
         }
     }
 
@@ -229,24 +230,27 @@ impl Shard {
             );
             return;
         }
-
+    
+        // Start timing the entire block creation process
+        let block_creation_time = Instant::now();
+    
         let mut transactions_to_include = Vec::new();
         transactions_to_include.extend(self.pending_cross_shard_txs.drain(..));
         transactions_to_include.extend(self.transaction_pool.drain(..));
         transactions_to_include.truncate(self.max_transactions_per_block);
-
+    
         for tx in transactions_to_include.iter_mut() {
             tx.status = TransactionStatus::Completed;
             println!("Transaction {} status updated to Completed.", tx.id);
         }
-
+    
         let tx_strings: Vec<String> = transactions_to_include.iter().map(|tx| tx.id.clone()).collect();
-
+    
         let mut validator_performance: HashMap<usize, ValidatorPerformance> = HashMap::new();
         for validator in &self.validators {
             validator_performance.insert(validator.id, ValidatorPerformance::from_validator(validator));
         }
-
+    
         match self.generator.generate_entries(tx_strings, validator_performance) {
             Ok(entries) => {
                 let block_number = self.blocks.len() as u64 + 1;
@@ -255,16 +259,25 @@ impl Shard {
                     .last()
                     .map(|block| block.block_hash.clone())
                     .unwrap_or_else(|| "0".to_string());
-
+    
                 let block = Block::new(block_number, entries.clone(), &previous_hash);
-
+    
                 if self.validate_block_with_validators(&block) {
                     self.blocks.push(block.clone());
-
+    
+                    // Time spent validating and finalizing the block
+                    let block_duration = block_creation_time.elapsed();  // Now we include full block processing time
+    
+                    BLOCK_GEN_TIMES.lock().unwrap().push(block_duration);  // Store the full block creation duration
+    
+                    // Capture and log the current timestamp using chrono
+                    let current_time = chrono::Utc::now();
                     println!(
-                        "Shard {}: Processed Block #{} with {} transactions",
+                        "Shard {}: Processed Block #{} in {} ms at {} with {} transactions",
                         self.id,
                         block.block_number,
+                        block_duration.as_millis(),
+                        current_time.format("%Y-%m-%d %H:%M:%S").to_string(),
                         transactions_to_include.len()
                     );
                     println!("Block Hash: {}", block.block_hash);
@@ -283,8 +296,8 @@ impl Shard {
             }
         }
     }
-
-    // Validate block with validators
+    
+    
     pub fn validate_block_with_validators(&mut self, block: &Block) -> bool {
         let mut total_weight = 0.0;
         let mut positive_weight = 0.0;
@@ -310,12 +323,10 @@ impl Shard {
         positive_weight > (total_weight * 0.3)
     }
 
-    // Drain pending checkpoint for cross-shard gossip
     pub fn drain_pending_checkpoint(&mut self) -> Option<Checkpoint> {
         self.pending_checkpoint.take()
     }
 
-    // Receive and process checkpoint from other shards
     pub fn receive_checkpoint(&mut self, checkpoint: Checkpoint) {
         println!("Shard {}: Received checkpoint from Shard {}", self.id, checkpoint.shard_id);
         self.ledger = checkpoint.ledger_snapshot;
@@ -335,7 +346,7 @@ impl Shard {
     }
 
     pub fn check_epoch_transition(&self) -> bool {
-        self.transaction_count >= self.epoch_threshold || self.epoch_start_time.elapsed() >= Duration::from_secs(30)
+        self.transaction_count >= self.epoch_threshold || self.epoch_start_time.elapsed() >= Duration::from_secs(3600)
     }
 
     pub fn transition_to_next_epoch(&mut self) {
@@ -346,7 +357,6 @@ impl Shard {
         println!("Shard {}: Transitioning to epoch {}", self.id, self.epoch);
 
         self.recalculate_validator_rankings();
-
         self.dynamic_assign_validators();
 
         for validator in &mut self.validators {

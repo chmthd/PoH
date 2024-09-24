@@ -2,14 +2,30 @@ async function fetchStats() {
     try {
         const response = await fetch('/api/stats');
         const data = await response.json();
+        
+        const transactionPoolSize = data.transaction_pool_size;
+        const networkLoadIndicator = document.getElementById('network-load-indicator');
 
-        // Update general stats
+        if (transactionPoolSize > 500) {
+            networkLoadIndicator.style.color = 'red';
+            networkLoadIndicator.innerText = 'Network Load: Busy';
+        } else if (transactionPoolSize > 200) {
+            networkLoadIndicator.style.color = 'yellow';
+            networkLoadIndicator.innerText = 'Network Load: Moderate';
+        } else {
+            networkLoadIndicator.style.color = 'green';
+            networkLoadIndicator.innerText = 'Network Load: Not Busy';
+        }
+
+        // Correctly display the current total block count
         document.getElementById('current-block-value').innerText = data.total_blocks;
+
+        // Update other transaction and block statistics
         document.getElementById('transactions-processed-value').innerText = data.total_transactions;
         document.getElementById('block-size-value').innerText = `${data.avg_block_size} bytes`;
         document.getElementById('avg-tx-size-value').innerText = `${data.avg_tx_size} bytes`;
 
-        // Update new metrics for block generation and propagation times
+        // Update block generation and propagation times
         document.getElementById('avg-block-gen-time').innerText = data.avg_block_gen_time_ms
             ? `${data.avg_block_gen_time_ms.toFixed(2)} ms`
             : 'N/A';
@@ -20,9 +36,12 @@ async function fetchStats() {
             ? `${data.avg_epoch_time_ms.toFixed(2)} ms`
             : 'N/A';
 
-        // Update transactions
+        // Display network uptime
+        document.getElementById('network-uptime').innerText = `Uptime: ${data.uptime} seconds`;
+
+        // Update transactions table
         const transactionsList = document.getElementById('transactions-list');
-        transactionsList.innerHTML = '';
+        transactionsList.innerHTML = ''; // Clear previous content
 
         data.shard_stats.forEach(shard => {
             shard.transactions.forEach(tx => {
@@ -39,16 +58,24 @@ async function fetchStats() {
 
         // Update shard info
         const shardInfoContainer = document.getElementById('shard-info');
-        shardInfoContainer.innerHTML = '';
+        shardInfoContainer.innerHTML = ''; // Clear previous content
+
         data.shard_info.forEach(info => {
             shardInfoContainer.innerHTML += `
                 <p>Shard ${info.id}: ${info.ip}:${info.port}</p>
             `;
         });
 
-        // Update validators
+        // Update shard block count
+        const shardBlockInfo = document.getElementById('shard-block-info');
+        shardBlockInfo.innerHTML = ''; // Clear previous content
+        data.shard_stats.forEach(shard => {
+            shardBlockInfo.innerHTML += `<p>Shard ${shard.id} Block Count: ${shard.block_count}</p>`;
+        });
+
+        // Update validators table
         const validatorsList = document.getElementById('validators-list');
-        validatorsList.innerHTML = '';
+        validatorsList.innerHTML = ''; // Clear previous content
 
         data.shard_stats.forEach(shard => {
             shard.validators.forEach(validator => {
@@ -69,7 +96,8 @@ async function fetchStats() {
 
         // Update checkpoint information
         const checkpointList = document.getElementById('checkpoints-list');
-        checkpointList.innerHTML = '';
+        checkpointList.innerHTML = ''; // Clear previous content
+
         data.shard_stats.forEach(shard => {
             if (shard.checkpoint) {
                 const row = document.createElement('tr');
@@ -93,10 +121,8 @@ async function fetchNodes() {
         const response = await fetch('/api/nodes');
         const nodes = await response.json();
 
-        console.log('Nodes received from server:', nodes);
-
         const nodesList = document.getElementById('nodes-list');
-        nodesList.innerHTML = '';
+        nodesList.innerHTML = ''; // Clear previous content
 
         nodes.forEach(node => {
             const listItem = document.createElement('li');
@@ -108,7 +134,7 @@ async function fetchNodes() {
     }
 }
 
-// Periodically refresh stats and node information
+// Periodically refresh stats and node information every 5 seconds
 setInterval(() => {
     fetchStats();
     fetchNodes();
