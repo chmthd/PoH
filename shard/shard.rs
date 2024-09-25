@@ -4,6 +4,8 @@ use crate::validator::validator::{Validator, ValidatorPerformance};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use crate::BLOCK_GEN_TIMES;
+use crate::LAST_BLOCK_TIMESTAMP;
+use chrono::Utc;
 
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
@@ -81,7 +83,7 @@ impl Shard {
             ledger: HashMap::new(),
             blocks: Vec::new(),
             validators,
-            min_transactions_per_block: 100,
+            min_transactions_per_block: 10,
             max_transactions_per_block,
             last_block_time: Instant::now(),
             block_time_threshold: Duration::from_secs(30),
@@ -230,27 +232,26 @@ impl Shard {
             );
             return;
         }
-    
-        // Start timing the entire block creation process
-        let block_creation_time = Instant::now();
-    
+
+        let block_creation_time = Instant::now(); // Start timer
+
         let mut transactions_to_include = Vec::new();
         transactions_to_include.extend(self.pending_cross_shard_txs.drain(..));
         transactions_to_include.extend(self.transaction_pool.drain(..));
         transactions_to_include.truncate(self.max_transactions_per_block);
-    
+
         for tx in transactions_to_include.iter_mut() {
             tx.status = TransactionStatus::Completed;
             println!("Transaction {} status updated to Completed.", tx.id);
         }
-    
+
         let tx_strings: Vec<String> = transactions_to_include.iter().map(|tx| tx.id.clone()).collect();
-    
+
         let mut validator_performance: HashMap<usize, ValidatorPerformance> = HashMap::new();
         for validator in &self.validators {
             validator_performance.insert(validator.id, ValidatorPerformance::from_validator(validator));
         }
-    
+
         match self.generator.generate_entries(tx_strings, validator_performance) {
             Ok(entries) => {
                 let block_number = self.blocks.len() as u64 + 1;
@@ -259,18 +260,28 @@ impl Shard {
                     .last()
                     .map(|block| block.block_hash.clone())
                     .unwrap_or_else(|| "0".to_string());
-    
+
                 let block = Block::new(block_number, entries.clone(), &previous_hash);
-    
+
                 if self.validate_block_with_validators(&block) {
                     self.blocks.push(block.clone());
-    
-                    // Time spent validating and finalizing the block
-                    let block_duration = block_creation_time.elapsed();  // Now we include full block processing time
-    
-                    BLOCK_GEN_TIMES.lock().unwrap().push(block_duration);  // Store the full block creation duration
-    
-                    // Capture and log the current timestamp using chrono
+
+                    // Record time for entire block creation, validation, and finalization
+                    let mut block_duration = block_creation_time.elapsed(); 
+
+                    // Track and update the timestamp for cross-shard block creation time calculation
+                    let mut last_block_ts = LAST_BLOCK_TIMESTAMP.lock().unwrap();
+                    if let Some(prev_timestamp) = *last_block_ts {
+                        let current_time = Utc::now();
+                        let time_diff = current_time.signed_duration_since(prev_timestamp).to_std().unwrap_or(Duration::from_millis(1));
+
+                        // Store block gen time
+                        BLOCK_GEN_TIMES.lock().unwrap().push(time_diff);
+                    }
+
+                    // Update the last block timestamp
+                    *last_block_ts = Some(Utc::now());
+
                     let current_time = chrono::Utc::now();
                     println!(
                         "Shard {}: Processed Block #{} in {} ms at {} with {} transactions",
@@ -296,8 +307,7 @@ impl Shard {
             }
         }
     }
-    
-    
+
     pub fn validate_block_with_validators(&mut self, block: &Block) -> bool {
         let mut total_weight = 0.0;
         let mut positive_weight = 0.0;

@@ -14,6 +14,7 @@ use network::bootstrap::bootstrap_node::BootstrapNode;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use chrono::Utc;
 use rand::Rng;
 use std::fs::OpenOptions;
 use std::io::{Write, Read};
@@ -86,8 +87,11 @@ struct NetworkStats {
     shard_info: Vec<ShardInfo>,
     shard_stats: Vec<ShardStats>,
     nodes: Vec<(String, String)>,
-    uptime: u64, // Track network uptime
+    uptime: u64, 
+    transactions_per_second: f64,
+    avg_cross_shard_processing_time: f64,
 }
+
 
 #[derive(Serialize)]
 struct CheckpointDetail {
@@ -99,6 +103,7 @@ struct CheckpointDetail {
 
 lazy_static! {
     static ref BLOCK_GEN_TIMES: Mutex<Vec<Duration>> = Mutex::new(Vec::new());
+    static ref LAST_BLOCK_TIMESTAMP: Mutex<Option<chrono::DateTime<Utc>>> = Mutex::new(None);
 }
 
 struct AppState {
@@ -108,7 +113,7 @@ struct AppState {
     block_prop_times: Arc<Mutex<Vec<Duration>>>,
     shard_info: Vec<ShardInfo>,
     nodes: Arc<Mutex<HashMap<String, String>>>,
-    start_time: Instant,  // Add network start time for uptime calculation
+    start_time: Instant,  
 }
 
 #[get("/api/stats")]
@@ -149,6 +154,8 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
     let mut shard_stats = Vec::new();
     let mut total_confirmation_time: u128 = 0;
     let mut confirmed_tx_count: usize = 0;
+    let mut total_cross_shard_processing_time: f64 = 0.0;
+    let mut cross_shard_tx_count: usize = 0;
 
     for shard in shards.iter() {
         let mut transactions = Vec::new();
@@ -180,6 +187,15 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
                             total_confirmation_time += duration;
                             confirmed_tx_count += 1;
                         }
+                    }
+
+                    // Calculate cross-shard transaction processing time
+                    if transaction.from_shard != transaction.to_shard {
+                        cross_shard_tx_count += 1;
+                        total_cross_shard_processing_time += tx_start_times
+                            .get(&transaction.id)
+                            .map(|start_time| start_time.elapsed().as_secs_f64())
+                            .unwrap_or(0.0);
                     }
                 }
             }
@@ -244,7 +260,7 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
             transactions,
             validators,
             checkpoint: checkpoint_detail,
-            block_count: shard.blocks.len(),  // Include block count
+            block_count: shard.blocks.len(),
         });
     }
 
@@ -254,16 +270,15 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         None
     };
 
-    let avg_block_gen_time_ms = {
+    let avg_block_gen_time_s = {
         let gen_times = BLOCK_GEN_TIMES.lock().unwrap();
         if !gen_times.is_empty() {
             let total_gen_time: u128 = gen_times.iter().map(|t| t.as_millis()).sum();
-            Some(total_gen_time as f64 / gen_times.len() as f64)
+            Some(total_gen_time as f64 / gen_times.len() as f64 / 1000.0)  // Convert to seconds
         } else {
             None
         }
     };
-    
 
     let avg_block_prop_time_ms = if !block_prop_times.is_empty() {
         Some(block_prop_times.iter().map(|t| t.as_millis()).sum::<u128>() as f64 / block_prop_times.len() as f64)
@@ -295,6 +310,20 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
     // Calculate network uptime
     let uptime = data.start_time.elapsed().as_secs();
 
+    // Calculate transactions processed per second
+    let transactions_per_second = if uptime > 0 {
+        total_transactions as f64 / uptime as f64
+    } else {
+        0.0
+    };
+
+    // Calculate average cross-shard transaction processing time
+    let avg_cross_shard_processing_time = if cross_shard_tx_count > 0 {
+        total_cross_shard_processing_time / cross_shard_tx_count as f64
+    } else {
+        0.0
+    };
+
     let stats = NetworkStats {
         num_shards: shards.len(),
         total_blocks,
@@ -305,17 +334,20 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         avg_tx_per_block,
         avg_tx_confirmation_time_ms,
         avg_tx_size,
-        avg_block_gen_time_ms,
+        avg_block_gen_time_ms: avg_block_gen_time_s, 
         avg_block_prop_time_ms,
         avg_epoch_time_ms,
         shard_info: data.shard_info.clone(),
         shard_stats,
         nodes: node_list,
-        uptime,  // Include uptime in stats
+        uptime,
+        transactions_per_second,  
+        avg_cross_shard_processing_time, 
     };
 
     HttpResponse::Ok().json(stats)
 }
+
 
 #[get("/api/nodes")]
 async fn get_nodes(data: web::Data<AppState>) -> impl Responder {
@@ -508,7 +540,7 @@ async fn main() -> std::io::Result<()> {
         block_prop_times: Arc::clone(&block_prop_times),
         shard_info: shard_infos,
         nodes: Arc::clone(&nodes),
-        start_time: Instant::now(),  // Initialize start time here
+        start_time: Instant::now(), 
     });
 
     for known_node in known_nodes {

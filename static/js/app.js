@@ -27,7 +27,7 @@ async function fetchStats() {
 
         // Update block generation and propagation times
         document.getElementById('avg-block-gen-time').innerText = data.avg_block_gen_time_ms
-            ? `${data.avg_block_gen_time_ms.toFixed(2)} ms`
+            ? `${(data.avg_block_gen_time_ms / 1000).toFixed(2)} s`
             : 'N/A';
         document.getElementById('avg-block-prop-time').innerText = data.avg_block_prop_time_ms
             ? `${data.avg_block_prop_time_ms.toFixed(2)} ms`
@@ -38,6 +38,10 @@ async function fetchStats() {
 
         // Display network uptime
         document.getElementById('network-uptime').innerText = `Uptime: ${data.uptime} seconds`;
+
+        // Update transactions per second and cross-shard transaction processing time
+        document.getElementById('txs-per-second').innerText = data.transactions_per_second.toFixed(2) + ' tx/s';
+        document.getElementById('cross-shard-tx-time').innerText = data.avg_cross_shard_processing_time.toFixed(2) + ' s';
 
         // Update transactions table
         const transactionsList = document.getElementById('transactions-list');
