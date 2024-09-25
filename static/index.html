@@ -7,8 +7,8 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            background-color: #ffffff;
-            color: #000;
+            background-color: #000;
+            color: #fff;
             margin: 0;
             padding: 20px;
             display: flex;
@@ -20,34 +20,31 @@
         h1 {
             text-align: center;
             margin-bottom: 20px;
-            color: #000;
+            color: #fff;
         }
 
         .dashboard {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(5, 1fr);
             gap: 20px;
             width: 100%;
-            max-width: 1300px;
+            max-width: 1700px;
             margin-bottom: 20px;
+            margin-top: 50px;
         }
 
         .stat-card {
-            border: 1px solid #666;
             border-radius: 12px;
             padding: 16px;
             text-align: center;
-            background-color: #ffffff;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            background-color: #252525;
             min-width: 200px;
         }
 
         .transactions-container, .validators-container, .checkpoints-container {
-            border: 1px solid #666;
             border-radius: 12px;
             padding: 16px;
-            background-color: #ffffff;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            background-color: #252525;
             overflow-y: auto;
             margin-bottom: 20px;
             width: 100%;
@@ -79,66 +76,80 @@
     </style>
 </head>
 <body>
-    <div id="network-load-indicator" style="position: fixed; top: 10px; left: 10px; font-weight: bold;">Loading...</div>
+    <div id="network-load-indicator" style="position: fixed; top: 10px; left: 10px; font-weight: bold;">loading...</div>
     <div class="dashboard">
         <div class="stat-card">
-            <h2>Current Block</h2>
-            <p id="current-block-value">Loading...</p>
+            <h2>current block</h2>
+            <p id="current-block-value">loading...</p>
         </div>
         <div class="stat-card">
-            <h2>Average Block Size</h2>
-            <p id="block-size-value">Loading...</p>
+            <h2>average block size</h2>
+            <p id="block-size-value">loading...</p>
         </div>
         <div class="stat-card">
-            <h2>Processed Transactions</h2>
-            <p id="transactions-processed-value">Loading...</p>
+            <h2>processed txs</h2>
+            <p id="transactions-processed-value">loading...</p>
         </div>
         <div class="stat-card">
-            <h2>Average Transaction Size</h2>
-            <p id="avg-tx-size-value">Loading...</p>
+            <h2>Average tx size</h2>
+            <p id="avg-tx-size-value">loading...</p>
         </div>
         <div class="stat-card">
-            <h2>Avg Block Gen Time</h2>
-            <p id="avg-block-gen-time">Loading...</p>
+            <h2>txs per second</h2>
+            <p id="txs-per-second">loading...</p>
         </div>
         <div class="stat-card">
-            <h2>Avg Block Prop Time</h2>
-            <p id="avg-block-prop-time">Loading...</p>
+            <h2>avg cross-shard tx time</h2>
+            <p id="cross-shard-tx-time">loading...</p>
         </div>
         <div class="stat-card">
-            <h2>Avg Epoch Time</h2>
-            <p id="avg-epoch-time">Loading...</p>
+            <h2>tx batch size</h2>
+            <p id="transaction-batch-size">loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>tx submission delay</h2>
+            <p id="delay-ms">loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>avg block gen time</h2>
+            <p id="avg-block-gen-time">loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>avg block prop time</h2>
+            <p id="avg-block-prop-time">loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>avg epoch period</h2>
+            <p id="avg-epoch-time">loading...</p>
         </div>  
         <div class="stat-card">
-            <h2>Network Uptime</h2>
-            <p id="network-uptime">Loading...</p>
+            <h2>network uptime</h2>
+            <p id="network-uptime">loading...</p>
         </div>
         <div class="stat-card">
-            <h2>Shard Info</h2>
+            <h2>shard info</h2>
             <div id="shard-info">
-                Loading...
+                loading...
             </div>
         </div>
         <div class="stat-card">
-            <h2>Shard Block Count</h2>
+            <h2>shard block count</h2>
             <div id="shard-block-info">
-                Loading...
+                loading...
             </div>
         </div>
         <div class="stat-card">
-            <h2>Transactions Per Second</h2>
-            <p id="txs-per-second">Loading...</p>
-        </div>
-        <div class="stat-card">
-            <h2>Avg Cross-Shard Tx Time</h2>
-            <p id="cross-shard-tx-time">Loading...</p>
+            <h2>pool size</h2>
+            <div id="shard-tx-pool-info">
+                loading...
+            </div>
         </div>
     </div>
 
     <div class="nodes-container">
         <h2>Registered Nodes</h2>
         <ul id="nodes-list">
-            <li>Loading...</li>
+            <li>loading...</li>
         </ul>
     </div>
 
@@ -155,10 +166,10 @@
             </thead>
             <tbody id="transactions-list">
                 <tr>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td> 
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td> 
                 </tr>
             </tbody>
         </table>
@@ -181,14 +192,14 @@
             </thead>
             <tbody id="validators-list">
                 <tr>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
                 </tr>
             </tbody>
         </table>
@@ -199,18 +210,18 @@
         <table>
             <thead>
                 <tr>
-                    <th>Shard ID</th>
-                    <th>Block Height</th>
-                    <th>Tx Pool Size</th>
-                    <th>Processed Tx Count</th>
+                    <th>shard id</th>
+                    <th>block height</th>
+                    <th>pool size</th>
+                    <th>processed tx count</th>
                 </tr>
             </thead>
             <tbody id="checkpoints-list">
                 <tr>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
-                    <td>Loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
+                    <td>loading...</td>
                 </tr>
             </tbody>
         </table>
@@ -227,17 +238,21 @@ async function fetchStats() {
 
         if (transactionPoolSize > 500) {
             networkLoadIndicator.style.color = 'red';
-            networkLoadIndicator.innerText = 'Network Load: Busy';
+            networkLoadIndicator.innerText = 'network load: busy';
         } else if (transactionPoolSize > 200) {
             networkLoadIndicator.style.color = 'yellow';
-            networkLoadIndicator.innerText = 'Network Load: Moderate';
+            networkLoadIndicator.innerText = 'network load: moderate';
         } else {
             networkLoadIndicator.style.color = 'green';
-            networkLoadIndicator.innerText = 'Network Load: Not Busy';
+            networkLoadIndicator.innerText = 'network load: not busy';
         }
 
         // Correctly display the current total block count
         document.getElementById('current-block-value').innerText = data.total_blocks;
+
+        // Update transaction batch size and delay
+        document.getElementById('transaction-batch-size').innerText = data.transaction_batch_size;
+        document.getElementById('delay-ms').innerText = `${data.delay_in_ms} ms`;
 
         // Update other transaction and block statistics
         document.getElementById('transactions-processed-value').innerText = data.total_transactions;
@@ -246,7 +261,7 @@ async function fetchStats() {
 
         // Update block generation and propagation times
         document.getElementById('avg-block-gen-time').innerText = data.avg_block_gen_time_ms
-            ? `${data.avg_block_gen_time_ms.toFixed(2)}s`
+            ? `${data.avg_block_gen_time_ms.toFixed(2)} s`
             : 'N/A';
         document.getElementById('avg-block-prop-time').innerText = data.avg_block_prop_time_ms
             ? `${data.avg_block_prop_time_ms.toFixed(2)} ms`
@@ -256,7 +271,7 @@ async function fetchStats() {
             : 'N/A';
 
         // Display network uptime
-        document.getElementById('network-uptime').innerText = `Uptime: ${data.uptime} seconds`;
+        document.getElementById('network-uptime').innerText = `${data.uptime} seconds`;
 
         // Update transactions per second and cross-shard transaction processing time
         document.getElementById('txs-per-second').innerText = data.transactions_per_second.toFixed(2) + ' tx/s';
@@ -293,7 +308,14 @@ async function fetchStats() {
         const shardBlockInfo = document.getElementById('shard-block-info');
         shardBlockInfo.innerHTML = ''; // Clear previous content
         data.shard_stats.forEach(shard => {
-            shardBlockInfo.innerHTML += `<p>Shard ${shard.id} Block Count: ${shard.block_count}</p>`;
+            shardBlockInfo.innerHTML += `<p>shard ${shard.id} block count: ${shard.block_count}</p>`;
+        });
+
+        // Update shard transaction pool size
+        const shardTxPoolInfo = document.getElementById('shard-tx-pool-info');
+        shardTxPoolInfo.innerHTML = ''; // Clear previous content
+        data.shard_stats.forEach(shard => {
+            shardTxPoolInfo.innerHTML += `<p>shard ${shard.id} pool size: ${shard.transaction_pool_size}</p>`;
         });
 
         // Update validators table

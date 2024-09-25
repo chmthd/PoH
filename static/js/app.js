@@ -27,7 +27,7 @@ async function fetchStats() {
 
         // Update block generation and propagation times
         document.getElementById('avg-block-gen-time').innerText = data.avg_block_gen_time_ms
-            ? `${(data.avg_block_gen_time_ms / 1000).toFixed(2)} s`
+            ? `${data.avg_block_gen_time_ms.toFixed(2)} s`
             : 'N/A';
         document.getElementById('avg-block-prop-time').innerText = data.avg_block_prop_time_ms
             ? `${data.avg_block_prop_time_ms.toFixed(2)} ms`

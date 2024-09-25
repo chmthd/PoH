@@ -67,7 +67,7 @@ struct ShardStats {
     transactions: Vec<TransactionDetail>,
     validators: Vec<ValidatorStats>,
     checkpoint: Option<CheckpointDetail>,
-    block_count: usize, // Add block count for each shard
+    block_count: usize,
 }
 
 #[derive(Serialize)]
@@ -82,8 +82,9 @@ struct NetworkStats {
     avg_tx_confirmation_time_ms: Option<u128>,
     avg_tx_size: usize,
     avg_block_gen_time_ms: Option<f64>,
-    avg_block_prop_time_ms: Option<f64>,
     avg_epoch_time_ms: Option<f64>,
+    transaction_batch_size: usize,
+    delay_in_ms: u64,
     shard_info: Vec<ShardInfo>,
     shard_stats: Vec<ShardStats>,
     nodes: Vec<(String, String)>,
@@ -91,7 +92,6 @@ struct NetworkStats {
     transactions_per_second: f64,
     avg_cross_shard_processing_time: f64,
 }
-
 
 #[derive(Serialize)]
 struct CheckpointDetail {
@@ -110,10 +110,11 @@ struct AppState {
     shards: Arc<Mutex<Vec<Shard>>>,
     transaction_start_times: Arc<Mutex<HashMap<String, Instant>>>,
     block_gen_times: Arc<Mutex<Vec<Duration>>>,
-    block_prop_times: Arc<Mutex<Vec<Duration>>>,
     shard_info: Vec<ShardInfo>,
     nodes: Arc<Mutex<HashMap<String, String>>>,
-    start_time: Instant,  
+    start_time: Instant,
+    transaction_batch_size: Arc<Mutex<usize>>,
+    delay_in_ms: Arc<Mutex<u64>>,
 }
 
 #[get("/api/stats")]
@@ -121,10 +122,9 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
     let shards = data.shards.lock().unwrap();
     let tx_start_times = data.transaction_start_times.lock().unwrap();
     let block_gen_times = data.block_gen_times.lock().unwrap();
-    let block_prop_times = data.block_prop_times.lock().unwrap();
 
     let total_blocks: usize = shards.iter().map(|shard| shard.blocks.len()).sum();
-    let total_transactions: usize = shards.iter().map(|shard| shard.get_processed_transactions().len()).sum();
+    let total_transactions: usize = shards.iter().map(|shard| shard.get_processed_transaction_count()).sum();
 
     let total_block_size: usize = shards.iter()
         .flat_map(|shard| shard.blocks.iter())
@@ -189,7 +189,6 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
                         }
                     }
 
-                    // Calculate cross-shard transaction processing time
                     if transaction.from_shard != transaction.to_shard {
                         cross_shard_tx_count += 1;
                         total_cross_shard_processing_time += tx_start_times
@@ -274,16 +273,10 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         let gen_times = BLOCK_GEN_TIMES.lock().unwrap();
         if !gen_times.is_empty() {
             let total_gen_time: u128 = gen_times.iter().map(|t| t.as_millis()).sum();
-            Some(total_gen_time as f64 / gen_times.len() as f64 / 1000.0)  // Convert to seconds
+            Some(total_gen_time as f64 / gen_times.len() as f64 / 1000.0)
         } else {
             None
         }
-    };
-
-    let avg_block_prop_time_ms = if !block_prop_times.is_empty() {
-        Some(block_prop_times.iter().map(|t| t.as_millis()).sum::<u128>() as f64 / block_prop_times.len() as f64)
-    } else {
-        None
     };
 
     let avg_tx_per_block = if total_blocks > 0 {
@@ -307,22 +300,21 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         }
     };
 
-    // Calculate network uptime
     let uptime = data.start_time.elapsed().as_secs();
-
-    // Calculate transactions processed per second
     let transactions_per_second = if uptime > 0 {
         total_transactions as f64 / uptime as f64
     } else {
         0.0
     };
 
-    // Calculate average cross-shard transaction processing time
     let avg_cross_shard_processing_time = if cross_shard_tx_count > 0 {
         total_cross_shard_processing_time / cross_shard_tx_count as f64
     } else {
         0.0
     };
+
+    let transaction_batch_size = *data.transaction_batch_size.lock().unwrap();
+    let delay_in_ms = *data.delay_in_ms.lock().unwrap();
 
     let stats = NetworkStats {
         num_shards: shards.len(),
@@ -335,8 +327,9 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
         avg_tx_confirmation_time_ms,
         avg_tx_size,
         avg_block_gen_time_ms: avg_block_gen_time_s, 
-        avg_block_prop_time_ms,
         avg_epoch_time_ms,
+        transaction_batch_size,
+        delay_in_ms,
         shard_info: data.shard_info.clone(),
         shard_stats,
         nodes: node_list,
@@ -347,7 +340,6 @@ async fn get_stats(data: web::Data<AppState>) -> impl Responder {
 
     HttpResponse::Ok().json(stats)
 }
-
 
 #[get("/api/nodes")]
 async fn get_nodes(data: web::Data<AppState>) -> impl Responder {
@@ -365,7 +357,8 @@ fn send_random_transactions(
     gossip_protocol: Arc<Mutex<GossipProtocol>>,
     tx_start_times: Arc<Mutex<HashMap<String, Instant>>>,
     block_gen_times: Arc<Mutex<Vec<Duration>>>,
-    block_prop_times: Arc<Mutex<Vec<Duration>>>
+    transaction_batch_size: Arc<Mutex<usize>>,
+    delay_in_ms: Arc<Mutex<u64>>,
 ) {
     thread::spawn(move || {
         let mut rng = rand::thread_rng();
@@ -377,8 +370,10 @@ fn send_random_transactions(
             .expect("Cannot open log file");
 
         loop {
-            let transaction_batch_size = rng.gen_range(1..2);
-            for _ in 0..transaction_batch_size {
+            let batch_size = rng.gen_range(1..2);
+            *transaction_batch_size.lock().unwrap() = batch_size;
+
+            for _ in 0..batch_size {
                 let amount = rng.gen_range(1..1000);
                 let shard_index = rng.gen_range(0..shards.lock().unwrap().len());
 
@@ -413,13 +408,14 @@ fn send_random_transactions(
             gossip_protocol.lock().unwrap().gossip(&mut shards.lock().unwrap());
 
             let delay = rng.gen_range(200..500);
+            *delay_in_ms.lock().unwrap() = delay as u64;
+
             thread::sleep(Duration::from_millis(delay as u64));
 
             if tx_count % 5 == 0 {
                 gossip_protocol.lock().unwrap().periodic_gossip(&mut shards.lock().unwrap());
 
-                let prop_time = Duration::from_millis(rng.gen_range(100..500));
-                block_prop_times.lock().unwrap().push(prop_time);
+                // Block propagation delay logic removed here.
             }
 
             let checkpoints: Vec<Checkpoint> = {
@@ -498,7 +494,7 @@ async fn main() -> std::io::Result<()> {
     let mut shards = Vec::new();
     let mut shard_infos = Vec::new();
 
-    for i in 1..=5 {
+    for i in 1..=10 {
         let mut validators = Vec::new();
         for j in 1..=num_validators {
             let final_vote_weight = final_vote_weight_config[j % final_vote_weight_config.len()];
@@ -530,17 +526,19 @@ async fn main() -> std::io::Result<()> {
 
     let gossip_protocol = Arc::new(Mutex::new(GossipProtocol::new()));
     let transaction_start_times = Arc::new(Mutex::new(HashMap::new()));
-    let block_gen_times = Arc::new(Mutex::new(Vec::new()));  
-    let block_prop_times = Arc::new(Mutex::new(Vec::new()));  
+    let block_gen_times = Arc::new(Mutex::new(Vec::new()));
+    let transaction_batch_size = Arc::new(Mutex::new(1));
+    let delay_in_ms = Arc::new(Mutex::new(200));
 
     let app_state = web::Data::new(AppState {
         shards: Arc::clone(&shards),
         transaction_start_times: Arc::clone(&transaction_start_times),
         block_gen_times: Arc::clone(&block_gen_times),
-        block_prop_times: Arc::clone(&block_prop_times),
         shard_info: shard_infos,
         nodes: Arc::clone(&nodes),
-        start_time: Instant::now(), 
+        start_time: Instant::now(),
+        transaction_batch_size: Arc::clone(&transaction_batch_size),
+        delay_in_ms: Arc::clone(&delay_in_ms),
     });
 
     for known_node in known_nodes {
@@ -552,9 +550,10 @@ async fn main() -> std::io::Result<()> {
         Arc::clone(&gossip_protocol),
         Arc::clone(&transaction_start_times),
         Arc::clone(&block_gen_times),
-        Arc::clone(&block_prop_times),
+        Arc::clone(&transaction_batch_size),
+        Arc::clone(&delay_in_ms),
     );
-    
+
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())

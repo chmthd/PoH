@@ -83,11 +83,11 @@ impl Shard {
             ledger: HashMap::new(),
             blocks: Vec::new(),
             validators,
-            min_transactions_per_block: 10,
+            min_transactions_per_block: 100,
             max_transactions_per_block,
             last_block_time: Instant::now(),
-            block_time_threshold: Duration::from_secs(30),
-            epoch_threshold: 3000,
+            block_time_threshold: Duration::from_secs(15),
+            epoch_threshold: 10,
             processed_transactions: HashSet::new(),
             pending_cross_shard_txs: Vec::new(),
             epoch_start_time: Instant::now(),
@@ -103,11 +103,14 @@ impl Shard {
         &self.transaction_pool
     }
 
-    // Modified to return only completed transactions
     pub fn get_processed_transactions(&self) -> Vec<&Transaction> {
         self.transaction_pool.iter()
             .filter(|tx| tx.status == TransactionStatus::Completed)
             .collect()
+    }
+
+    pub fn get_processed_transaction_count(&self) -> usize {
+        self.blocks.iter().map(|block| block.poh_entries[0].transactions.len()).sum()
     }
 
     pub fn get_pending_cross_shard_txs_len(&self) -> usize {
@@ -124,14 +127,10 @@ impl Shard {
 
     pub fn process_transactions(&mut self, transactions: Vec<Transaction>) {
         for mut tx in transactions {
-            if !self.processed_transactions.contains(&tx.id) {
-                if tx.to_shard == self.id {
-                    println!("Shard {}: Processing transaction {}", self.id, tx.id);
-                    tx.status = TransactionStatus::Processing;
-                    self.transaction_pool.push(tx.clone());
-                    self.transaction_count += 1;
-                }
-                self.processed_transactions.insert(tx.id.clone());
+            if tx.to_shard == self.id {
+                println!("Shard {}: Adding transaction {} to pool", self.id, tx.id);
+                tx.status = TransactionStatus::Pending;
+                self.transaction_pool.push(tx.clone());
             }
         }
 
@@ -139,47 +138,43 @@ impl Shard {
     }
 
     pub fn process_cross_shard_transaction(&mut self, mut transaction: Transaction) {
-        if self.processed_transactions.contains(&transaction.id) {
+        if !self.processed_transactions.contains(&transaction.id) {
+            println!(
+                "Shard {}: Processing cross-shard transaction {} from Shard {}",
+                self.id, transaction.id, transaction.from_shard
+            );
+
+            transaction.status = TransactionStatus::Pending;
+            self.transaction_pool.push(transaction.clone());
+
+            self.check_and_create_block();
+        } else {
             println!(
                 "Shard {}: Ignoring duplicate cross-shard transaction {}",
                 self.id, transaction.id
             );
-            return;
         }
-
-        println!(
-            "Shard {}: Processing cross-shard transaction {} from Shard {}",
-            self.id, transaction.id, transaction.from_shard
-        );
-
-        transaction.status = TransactionStatus::Processing;
-        self.transaction_pool.push(transaction.clone());
-        self.transaction_count += 1;
-        self.processed_transactions.insert(transaction.id.clone());
-
-        self.check_and_create_block();
     }
 
     pub fn add_pending_cross_shard_tx(&mut self, transaction: Transaction) {
-        if self.processed_transactions.contains(&transaction.id) {
+        if !self.processed_transactions.contains(&transaction.id) {
+            println!(
+                "Shard {}: Adding pending cross-shard transaction {}",
+                self.id, transaction.id
+            );
+            self.pending_cross_shard_txs.push(transaction);
+
+            println!(
+                "Shard {}: Pending cross-shard transactions count: {}",
+                self.id,
+                self.pending_cross_shard_txs.len()
+            );
+        } else {
             println!(
                 "Shard {}: Ignoring pending cross-shard transaction {} (already processed).",
                 self.id, transaction.id
             );
-            return;
         }
-
-        println!(
-            "Shard {}: Adding pending cross-shard transaction {}",
-            self.id, transaction.id
-        );
-        self.pending_cross_shard_txs.push(transaction);
-
-        println!(
-            "Shard {}: Pending cross-shard transactions count: {}",
-            self.id,
-            self.pending_cross_shard_txs.len()
-        );
     }
 
     pub fn check_and_create_block(&mut self) {
@@ -212,12 +207,12 @@ impl Shard {
     }
 
     fn calculate_dynamic_min_transactions(&self, total_transactions: usize) -> usize {
-        if total_transactions > 2000 {
-            2000
-        } else if total_transactions > 1000 {
-            (self.max_transactions_per_block as f64 * 0.6) as usize
-        } else if total_transactions > 500 {
-            (self.max_transactions_per_block as f64 * 0.3) as usize
+        if total_transactions > 1500 {
+            1500
+        } else if total_transactions > 750 {
+            (self.max_transactions_per_block as f64 * 0.5) as usize
+        } else if total_transactions > 300 {
+            (self.max_transactions_per_block as f64 * 0.2) as usize
         } else {
             self.min_transactions_per_block
         }
@@ -225,6 +220,7 @@ impl Shard {
 
     fn create_block(&mut self) {
         let total_transactions = self.transaction_pool.len() + self.pending_cross_shard_txs.len();
+    
         if total_transactions < self.min_transactions_per_block {
             println!(
                 "Shard {}: Not enough transactions to fill the block. Current pool size: {}. Waiting for more transactions...",
@@ -232,26 +228,24 @@ impl Shard {
             );
             return;
         }
-
-        let block_creation_time = Instant::now(); // Start timer
-
+    
+        let block_creation_time = Instant::now();
+    
         let mut transactions_to_include = Vec::new();
+    
         transactions_to_include.extend(self.pending_cross_shard_txs.drain(..));
         transactions_to_include.extend(self.transaction_pool.drain(..));
+    
         transactions_to_include.truncate(self.max_transactions_per_block);
-
-        for tx in transactions_to_include.iter_mut() {
-            tx.status = TransactionStatus::Completed;
-            println!("Transaction {} status updated to Completed.", tx.id);
-        }
-
+    
         let tx_strings: Vec<String> = transactions_to_include.iter().map(|tx| tx.id.clone()).collect();
-
+    
         let mut validator_performance: HashMap<usize, ValidatorPerformance> = HashMap::new();
+    
         for validator in &self.validators {
             validator_performance.insert(validator.id, ValidatorPerformance::from_validator(validator));
         }
-
+    
         match self.generator.generate_entries(tx_strings, validator_performance) {
             Ok(entries) => {
                 let block_number = self.blocks.len() as u64 + 1;
@@ -260,28 +254,33 @@ impl Shard {
                     .last()
                     .map(|block| block.block_hash.clone())
                     .unwrap_or_else(|| "0".to_string());
-
+    
                 let block = Block::new(block_number, entries.clone(), &previous_hash);
-
+    
                 if self.validate_block_with_validators(&block) {
                     self.blocks.push(block.clone());
-
-                    // Record time for entire block creation, validation, and finalization
-                    let mut block_duration = block_creation_time.elapsed(); 
-
-                    // Track and update the timestamp for cross-shard block creation time calculation
+    
+                    for tx in transactions_to_include.iter_mut() {
+                        tx.status = TransactionStatus::Completed;
+                        self.processed_transactions.insert(tx.id.clone());
+                        self.transaction_count += 1;
+                        println!("Transaction {} status updated to Completed.", tx.id);
+                    }
+    
+                    let block_duration = block_creation_time.elapsed();
+    
                     let mut last_block_ts = LAST_BLOCK_TIMESTAMP.lock().unwrap();
                     if let Some(prev_timestamp) = *last_block_ts {
                         let current_time = Utc::now();
-                        let time_diff = current_time.signed_duration_since(prev_timestamp).to_std().unwrap_or(Duration::from_millis(1));
-
-                        // Store block gen time
+                        let time_diff = current_time.signed_duration_since(prev_timestamp)
+                            .to_std()
+                            .unwrap_or(Duration::from_millis(1));
+    
                         BLOCK_GEN_TIMES.lock().unwrap().push(time_diff);
                     }
-
-                    // Update the last block timestamp
+    
                     *last_block_ts = Some(Utc::now());
-
+    
                     let current_time = chrono::Utc::now();
                     println!(
                         "Shard {}: Processed Block #{} in {} ms at {} with {} transactions",
@@ -299,6 +298,7 @@ impl Shard {
                     );
                 } else {
                     println!("Shard {}: Block #{} failed validation. Discarding block.", self.id, block_number);
+                    self.transaction_pool.extend(transactions_to_include);
                 }
             }
             Err(e) => {
