@@ -16,5 +16,5 @@ lazy_static = "1.4.0"
 
 
 [[bin]]
-name = "poh"
+name = "bootstrap_node_binary"
 path = "main.rs"

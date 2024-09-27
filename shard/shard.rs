@@ -282,19 +282,10 @@ impl Shard {
                     *last_block_ts = Some(Utc::now());
     
                     let current_time = chrono::Utc::now();
-                    println!(
-                        "Shard {}: Processed Block #{} in {} ms at {} with {} transactions",
-                        self.id,
-                        block.block_number,
-                        block_duration.as_millis(),
+                    println!("#{} created in {} ms at {}. {} transactions included",
+                        block.block_number, block_duration.as_millis(),
                         current_time.format("%Y-%m-%d %H:%M:%S").to_string(),
                         transactions_to_include.len()
-                    );
-                    println!("Block Hash: {}", block.block_hash);
-                    println!("Previous Hash: {}", previous_hash);
-                    println!(
-                        "Included Transactions: {:?}",
-                        transactions_to_include.iter().map(|tx| tx.id.clone()).collect::<Vec<_>>()
                     );
                 } else {
                     println!("Shard {}: Block #{} failed validation. Discarding block.", self.id, block_number);

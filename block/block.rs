@@ -9,7 +9,7 @@ pub struct Block {
     pub poh_entries: Vec<PohEntry>,
     pub previous_hash: String,
     pub block_hash: String,
-    pub timestamp: i64,  // New timestamp field for block generation
+    pub timestamp: i64,  
 }
 
 impl Block {
@@ -26,14 +26,14 @@ impl Block {
             write!(&mut hash_str, "{:02x}", byte).expect("Unable to write");
         }
 
-        let timestamp = Utc::now().timestamp();  // Capture the timestamp when block is created.
+        let timestamp = Utc::now().timestamp();  
 
         Block {
             block_number,
             poh_entries,
             previous_hash: previous_hash.to_string(),
             block_hash: hash_str,
-            timestamp,  // Assign the block's generation timestamp.
+            timestamp,  
         }
     }
 }

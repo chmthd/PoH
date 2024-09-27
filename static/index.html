@@ -3,10 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
     <title>Dashboard</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: Inter;
             background-color: #000;
             color: #fff;
             margin: 0;
@@ -30,7 +33,7 @@
             width: 100%;
             max-width: 1700px;
             margin-bottom: 20px;
-            margin-top: 50px;
+            margin-top: 30px;
         }
 
         .stat-card {
@@ -50,19 +53,38 @@
             width: 100%;
         }
 
+        .table-container {
+        overflow-x: auto;
+    }
+
         table {
             width: 100%;
             border-collapse: collapse;
+            background-color: #252525;
+            color: #fff;
+            text-align: left;
         }
 
         th, td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid #444;
+            padding: 12px;
+            border: 1px solid #444;
         }
 
         th {
-            font-weight: bold;
+            background-color: #333;
+            color: #fff;
+        }
+
+        td {
+            word-wrap: break-word;
+        }
+
+        tbody tr:nth-child(even) {
+            background-color: #2f2f2f;
+        }
+
+        tbody tr:hover {
+            background-color: #3d3d3d;
         }
 
         .nodes-container ul {
@@ -144,7 +166,26 @@
                 loading...
             </div>
         </div>
-    </div>
+        <div class="stat-card">
+            <h2>Registered Validators</h2>
+            <div id="registered-validators">
+                loading...
+            </div>
+        </div>
+        <div class="table-container">
+            <h2>Validator Assignment</h2>
+            <table id="validator-assignment-table">
+                <thead>
+                    <tr>
+                        <th>Shard</th>
+                        <th>Validators</th>
+                    </tr>
+                </thead>
+                <tbody>
+                </tbody>
+            </table>
+        </div>
+    </div>    
 
     <div class="nodes-container">
         <h2>Registered Nodes</h2>
@@ -356,6 +397,28 @@ async function fetchStats() {
             }
         });
 
+        // Update validators per shard in the table
+        const validatorAssignmentTable = document.getElementById('validator-assignment-table').querySelector('tbody');
+        validatorAssignmentTable.innerHTML = '';  // Clear previous content
+        
+        data.shard_stats.forEach(shard => {
+            const row = document.createElement('tr');
+            const shardCell = document.createElement('td');
+            const validatorsCell = document.createElement('td');
+
+            shardCell.innerText = `Shard ${shard.id}`;
+            
+            const validators = shard.validators.map(validator => {
+                return `ID: ${validator.id} (${validator.final_vote_weight.toFixed(1)})`;
+            }).join(', ');
+
+            validatorsCell.innerText = validators;
+
+            row.appendChild(shardCell);
+            row.appendChild(validatorsCell);
+            validatorAssignmentTable.appendChild(row);
+        });
+
     } catch (error) {
         console.error('Error fetching stats:', error);
     }
@@ -366,14 +429,18 @@ async function fetchNodes() {
         const response = await fetch('/api/nodes');
         const nodes = await response.json();
 
-        const nodesList = document.getElementById('nodes-list');
-        nodesList.innerHTML = ''; // Clear previous content
+        const validatorsContainer = document.getElementById('registered-validators');
+        validatorsContainer.innerHTML = ''; // Clear previous content
 
-        nodes.forEach(node => {
-            const listItem = document.createElement('li');
-            listItem.innerText = `Node ${node[0]}: ${node[1]}`;
-            nodesList.appendChild(listItem);
-        });
+        if (nodes.length === 0) {
+            validatorsContainer.innerText = 'No validators registered.';
+        } else {
+            nodes.forEach(node => {
+                const paragraph = document.createElement('p');
+                paragraph.innerText = node;
+                validatorsContainer.appendChild(paragraph);
+            });
+        }
     } catch (error) {
         console.error('Error fetching nodes:', error);
     }
@@ -383,7 +450,7 @@ async function fetchNodes() {
 setInterval(() => {
     fetchStats();
     fetchNodes();
-}, 5000);
+}, 2000);
 
 fetchStats();
 fetchNodes();
